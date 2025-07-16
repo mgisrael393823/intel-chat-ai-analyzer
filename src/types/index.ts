@@ -10,10 +10,14 @@ export interface Document {
   id: string;
   name: string;
   size: number;
-  uploadedAt: Date;
+  type: string;
+  storage_url: string;
+  extracted_text?: string;
   status: 'uploading' | 'processing' | 'ready' | 'error';
-  extractedText?: string;
-  storageUrl?: string;
+  upload_progress?: number;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Thread {
