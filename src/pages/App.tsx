@@ -234,7 +234,7 @@ const App = () => {
               onStopGeneration={handleStopGeneration}
               isStreaming={isStreaming}
               disabled={isUploading}
-              hasUploadedFiles={uploadedFiles.length > 0}
+              hasUploadedFiles={uploadedDocuments.length > 0}
             />
           </div>
         </div>
