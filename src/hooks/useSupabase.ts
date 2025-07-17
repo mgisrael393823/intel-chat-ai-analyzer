@@ -183,12 +183,139 @@ export const useSupabase = () => {
     };
   };
 
+  const sendMessage = async (
+    message: string, 
+    threadId?: string, 
+    documentId?: string,
+    onChunk?: (content: string) => void,
+    onComplete?: (threadId: string, messageId: string) => void,
+    onError?: (error: string) => void
+  ): Promise<void> => {
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        throw new Error('Authentication required');
+      }
+
+      // Make direct fetch call for streaming support
+      const response = await fetch(`${supabase.supabaseUrl}/functions/v1/chat-stream`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message, threadId, documentId }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      if (!response.body) {
+        throw new Error('No response body');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      let currentThreadId = threadId;
+      let currentMessageId: string | undefined;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            
+            try {
+              const parsed = JSON.parse(data);
+              
+              switch (parsed.type) {
+                case 'thread':
+                  currentThreadId = parsed.threadId;
+                  currentMessageId = parsed.messageId;
+                  break;
+                case 'content':
+                  onChunk?.(parsed.content);
+                  break;
+                case 'done':
+                  if (currentThreadId && currentMessageId) {
+                    onComplete?.(currentThreadId, currentMessageId);
+                  }
+                  return;
+                case 'error':
+                  onError?.(parsed.error);
+                  return;
+              }
+            } catch (e) {
+              // Skip invalid JSON
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Send message error:', error);
+      onError?.(error instanceof Error ? error.message : 'Failed to send message');
+    }
+  };
+
+  const getThreadMessages = async (threadId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('thread_id', threadId)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('Get thread messages error:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Get thread messages error:', error);
+      return [];
+    }
+  };
+
+  const getUserThreads = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('threads')
+        .select(`
+          *,
+          documents(name),
+          messages(content, created_at)
+        `)
+        .order('updated_at', { ascending: false });
+
+      if (error) {
+        console.error('Get user threads error:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Get user threads error:', error);
+      return [];
+    }
+  };
+
   return { 
     uploadFile, 
     getDocument, 
     getUserDocuments, 
     deleteDocument, 
     extractPdfText,
-    subscribeToDocumentChanges 
+    subscribeToDocumentChanges,
+    sendMessage,
+    getThreadMessages,
+    getUserThreads
   };
 };

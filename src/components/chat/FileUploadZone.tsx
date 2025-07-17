@@ -12,7 +12,7 @@ interface UploadedFile {
 }
 
 interface FileUploadZoneProps {
-  onFileUpload: (files: UploadedFile[]) => void;
+  onFileUpload: (files: File[]) => void;
   uploadedFiles: UploadedFile[];
   isUploading: boolean;
   uploadProgress: number;
@@ -53,15 +53,17 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
   }, []);
 
   const handleFiles = (files: File[]) => {
-    const uploadedFiles: UploadedFile[] = files.map(file => ({
-      id: Math.random().toString(36).substr(2, 9),
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      preview: 'Sample extracted text from the document...'
-    }));
+    // Filter for PDF files only
+    const pdfFiles = files.filter(file => file.type === 'application/pdf');
     
-    onFileUpload(uploadedFiles);
+    if (pdfFiles.length !== files.length) {
+      // Show error for non-PDF files
+      console.warn('Only PDF files are allowed');
+    }
+    
+    if (pdfFiles.length > 0) {
+      onFileUpload(pdfFiles);
+    }
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -71,8 +73,9 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
   };
 
   const removeFile = (fileId: string) => {
-    const updatedFiles = uploadedFiles.filter(file => file.id !== fileId);
-    onFileUpload(updatedFiles);
+    // For now, just log - file deletion should be handled through the parent component
+    console.log('Remove file:', fileId);
+    // TODO: Implement file deletion through parent component callback
   };
 
   return (

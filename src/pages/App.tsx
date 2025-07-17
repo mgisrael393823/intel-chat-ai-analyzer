@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowLeft, LogOut } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { FileUploadZone } from '@/components/chat/FileUploadZone';
@@ -8,6 +8,7 @@ import { Message } from '@/components/chat/ChatMessage';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
+import { useSupabase, Document } from '@/hooks/useSupabase';
 
 interface UploadedFile {
   id: string;
@@ -18,69 +19,161 @@ interface UploadedFile {
 }
 
 const App = () => {
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploadedDocuments, setUploadedDocuments] = useState<Document[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [currentThreadId, setCurrentThreadId] = useState<string | undefined>();
+  const [streamingMessage, setStreamingMessage] = useState<string>('');
+  
+  const { 
+    uploadFile, 
+    getUserDocuments, 
+    sendMessage, 
+    getThreadMessages,
+    subscribeToDocumentChanges 
+  } = useSupabase();
 
-  const handleFileUpload = (files: UploadedFile[]) => {
+  // Load user documents on mount
+  useEffect(() => {
+    const loadDocuments = async () => {
+      const docs = await getUserDocuments();
+      setUploadedDocuments(docs);
+      
+      // Add welcome message if user has documents
+      if (docs.length > 0 && messages.length === 0) {
+        const welcomeMessage: Message = {
+          id: 'welcome',
+          content: `Welcome! I can see you have ${docs.length} document(s) uploaded. Ask me questions about your commercial real estate deals, such as:\n\n• What are the key financial metrics?\n• What's the property type and location?\n• What are the investment risks and opportunities?`,
+          role: 'assistant',
+          timestamp: new Date()
+        };
+        setMessages([welcomeMessage]);
+      }
+    };
+    
+    loadDocuments();
+  }, []);
+
+  const handleFileUpload = async (files: File[]) => {
+    if (files.length === 0) return;
+    
     setIsUploading(true);
     setUploadProgress(0);
 
-    // Simulate upload progress
-    const interval = setInterval(() => {
-      setUploadProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setIsUploading(false);
-          setUploadedFiles(files);
-          
-          // Add welcome message when first file is uploaded
-          if (files.length > 0 && messages.length === 0) {
-            const welcomeMessage: Message = {
-              id: Date.now().toString(),
-              content: `Great! I've analyzed your document "${files[0].name}". You can now ask me questions about this offering memorandum. For example:\n\n• What's the property type and location?\n• What are the key financial metrics?\n• What's the investment strategy?`,
-              role: 'assistant',
-              timestamp: new Date()
-            };
-            setMessages([welcomeMessage]);
-          }
-          
-          return 0;
-        }
-        return prev + 10;
-      });
-    }, 100);
+    try {
+      for (const file of files) {
+        const document = await uploadFile(file);
+        setUploadedDocuments(prev => [...prev, document]);
+        
+        // Add success message
+        const successMessage: Message = {
+          id: Date.now().toString(),
+          content: `Great! I've uploaded "${document.name}" and it's being processed. You can start asking me questions about this offering memorandum while I extract the text.`,
+          role: 'assistant',
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, successMessage]);
+      }
+      
+      setUploadProgress(100);
+    } catch (error) {
+      console.error('Upload failed:', error);
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        content: `Sorry, there was an error uploading your file: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        role: 'assistant',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsUploading(false);
+      setTimeout(() => setUploadProgress(0), 1000);
+    }
   };
 
-  const handleSendMessage = (content: string) => {
+  const handleSendMessage = async (content: string) => {
+    // Add user message immediately
     const userMessage: Message = {
       id: Date.now().toString(),
       content,
       role: 'user',
       timestamp: new Date()
     };
-
     setMessages(prev => [...prev, userMessage]);
+
+    // Start streaming
     setIsStreaming(true);
+    setStreamingMessage('');
 
-    // Simulate AI response
-    setTimeout(() => {
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: `Based on the document you uploaded, here's my analysis of your question:\n\n${content}\n\nThis is a simulated response. In a real implementation, I would analyze the actual PDF content and provide specific insights about the commercial real estate deal, including financial metrics, property details, market analysis, and investment recommendations.`,
-        role: 'assistant',
-        timestamp: new Date()
-      };
+    // Create temporary assistant message for streaming
+    const tempAssistantMessage: Message = {
+      id: (Date.now() + 1).toString(),
+      content: '',
+      role: 'assistant',
+      timestamp: new Date(),
+      status: 'streaming'
+    };
+    setMessages(prev => [...prev, tempAssistantMessage]);
 
-      setMessages(prev => [...prev, aiMessage]);
-      setIsStreaming(false);
-    }, 2000);
+    // Get the most recent document for context
+    const documentId = uploadedDocuments.length > 0 ? uploadedDocuments[0].id : undefined;
+
+    await sendMessage(
+      content,
+      currentThreadId,
+      documentId,
+      // onChunk - append streaming content
+      (chunk: string) => {
+        setStreamingMessage(prev => prev + chunk);
+        setMessages(prevMessages => 
+          prevMessages.map(msg => 
+            msg.id === tempAssistantMessage.id 
+              ? { ...msg, content: msg.content + chunk }
+              : msg
+          )
+        );
+      },
+      // onComplete - finalize message
+      (threadId: string, messageId: string) => {
+        setCurrentThreadId(threadId);
+        setIsStreaming(false);
+        setStreamingMessage('');
+        
+        // Update the message with final status
+        setMessages(prevMessages => 
+          prevMessages.map(msg => 
+            msg.id === tempAssistantMessage.id 
+              ? { ...msg, status: 'sent' }
+              : msg
+          )
+        );
+      },
+      // onError - handle errors
+      (error: string) => {
+        setIsStreaming(false);
+        setStreamingMessage('');
+        
+        // Replace streaming message with error
+        setMessages(prevMessages => 
+          prevMessages.map(msg => 
+            msg.id === tempAssistantMessage.id 
+              ? { 
+                  ...msg, 
+                  content: `Sorry, I encountered an error: ${error}`, 
+                  status: 'error' 
+                }
+              : msg
+          )
+        );
+      }
+    );
   };
 
   const handleStopGeneration = () => {
     setIsStreaming(false);
+    // TODO: Implement actual stream cancellation
   };
 
   const handleSignOut = async () => {
@@ -118,7 +211,12 @@ const App = () => {
           <div className="w-full md:w-[30%] md:min-w-[350px]">
             <FileUploadZone
               onFileUpload={handleFileUpload}
-              uploadedFiles={uploadedFiles}
+              uploadedFiles={uploadedDocuments.map(doc => ({
+                id: doc.id,
+                name: doc.name,
+                size: doc.size,
+                type: doc.type,
+              }))}
               isUploading={isUploading}
               uploadProgress={uploadProgress}
             />
