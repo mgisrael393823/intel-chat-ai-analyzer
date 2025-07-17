@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, LogOut } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { FileUploadZone } from '@/components/chat/FileUploadZone';
 import { ChatMessages } from '@/components/chat/ChatMessages';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { Message } from '@/components/chat/ChatMessage';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { Button } from '@/components/ui/button';
+import { supabase } from '@/integrations/supabase/client';
 
 interface UploadedFile {
   id: string;
@@ -80,7 +83,11 @@ const App = () => {
     setIsStreaming(false);
   };
 
-  return (
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+  };
+
+  const AppContent = () => (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20">
       {/* Header */}
       <header className="border-b border-border/50 bg-card/50 backdrop-blur-sm">
@@ -91,7 +98,15 @@ const App = () => {
               Back to Home
             </Link>
             <h1 className="text-xl font-semibold text-foreground">OM Intel Chat</h1>
-            <div className="w-20"></div>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={handleSignOut}
+              className="flex items-center gap-2"
+            >
+              <LogOut className="w-4 h-4" />
+              Sign Out
+            </Button>
           </div>
         </div>
       </header>
@@ -129,6 +144,12 @@ const App = () => {
 
       {/* Mobile responsive handled by Tailwind classes */}
     </div>
+  );
+
+  return (
+    <ProtectedRoute>
+      <AppContent />
+    </ProtectedRoute>
   );
 };
 
