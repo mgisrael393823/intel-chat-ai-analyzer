@@ -22,33 +22,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
   useEffect(() => {
     let mounted = true;
-    
-    // Check if we have auth params in the URL (from magic link)
-    const handleAuthCallback = async () => {
-      const hashParams = new URLSearchParams(window.location.hash.substring(1));
-      const access_token = hashParams.get('access_token');
-      const refresh_token = hashParams.get('refresh_token');
-      
-      if (access_token && refresh_token) {
-        console.log('ProtectedRoute: Found auth tokens in URL, setting session...');
-        try {
-          const { data, error } = await supabase.auth.setSession({
-            access_token,
-            refresh_token
-          });
-          
-          if (error) {
-            console.error('Error setting session from tokens:', error);
-          } else {
-            console.log('Successfully set session from magic link');
-            // Clean up URL
-            window.history.replaceState(null, '', window.location.pathname);
-          }
-        } catch (err) {
-          console.error('Failed to set session from tokens:', err);
-        }
-      }
-    };
+    let timeoutId: NodeJS.Timeout;
     
     // Get initial session
     const getSession = async () => {
@@ -57,11 +31,17 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       console.log('Hash params:', window.location.hash);
       console.log('Search params:', window.location.search);
       
-      // First check for auth callback
-      await handleAuthCallback();
+      // Check if we're in the middle of an auth callback
+      const isAuthCallback = window.location.hash.includes('access_token');
+      if (isAuthCallback) {
+        console.log('ProtectedRoute: Auth callback detected, waiting for Supabase to handle it...');
+        // Give Supabase time to process the auth callback
+        // The onAuthStateChange listener will handle the session
+        return;
+      }
       
       // Set a timeout to prevent infinite loading
-      const timeoutId = setTimeout(() => {
+      timeoutId = setTimeout(() => {
         if (mounted && isLoading) {
           console.error('Session fetch timeout - forcing completion');
           setIsLoading(false);
@@ -110,15 +90,18 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       }
     };
 
-    getSession();
-
-    // Listen for auth changes
+    // Listen for auth changes first
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('ProtectedRoute: Auth state change:', { event, session });
         console.log('User from session:', session?.user);
         
         if (!mounted) return;
+        
+        // Clear any pending timeouts
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
         
         setUser(session?.user ?? null);
         setIsLoading(false);
@@ -129,6 +112,10 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
           // Auto-create user profile if it doesn't exist
           if (session?.user) {
             await createUserProfileIfNeeded(session.user);
+          }
+          // Clean up URL after successful auth
+          if (window.location.hash.includes('access_token')) {
+            window.history.replaceState(null, '', window.location.pathname);
           }
         }
 
@@ -144,9 +131,15 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
         }
       }
     );
+    
+    // Then get the session
+    getSession();
 
     return () => {
       mounted = false;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       subscription.unsubscribe();
     };
   }, []);
