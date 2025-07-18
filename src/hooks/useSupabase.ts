@@ -183,6 +183,58 @@ export const useSupabase = () => {
     };
   };
 
+  /**
+   * Fetch helper for streaming chat completions from the Supabase edge function.
+   * Adds required headers and handles Server-Sent Events (SSE) parsing.
+   */
+  const fetchChatStream = async (
+    openaiKey: string,
+    messages: { role: string; content: string }[],
+    model: string,
+    temperature: number,
+    onChunk: (chunk: string) => void
+  ): Promise<void> => {
+    const response = await fetch('/functions/v1/chat-stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${openaiKey}`,
+      },
+      body: JSON.stringify({ messages, model, temperature }),
+    });
+
+    if (!response.ok) {
+      console.error(await response.text());
+      throw new Error(`Request failed with status ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body');
+    }
+
+    const decoder = new TextDecoder();
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') return;
+          try {
+            const parsed = JSON.parse(data);
+            const content = parsed.choices?.[0]?.delta?.content;
+            if (content) onChunk(content);
+          } catch {
+            /* ignore malformed JSON */
+          }
+        }
+      }
+    }
+  };
+
   const sendMessage = async (
     message: string, 
     threadId?: string, 
@@ -350,6 +402,7 @@ export const useSupabase = () => {
     deleteDocument, 
     extractPdfText,
     subscribeToDocumentChanges,
+    fetchChatStream,
     sendMessage,
     getThreadMessages,
     getUserThreads,

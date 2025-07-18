@@ -8,11 +8,12 @@ export const AuthCallbackListener = () => {
 
   useEffect(() => {
     let mounted = true;
-    
+    let cleanup: (() => void) | undefined;
+
     const handleAuth = async () => {
-      console.log('🎯 AuthCallbackListener: Starting magic link processing');
-      console.log('📍 Current URL:', window.location.href);
-      console.log('🔗 Hash before exchange:', window.location.hash);
+      // === Step 1: exchange the magic-link tokens in the URL ===
+      console.log('Starting auth callback');
+      console.log('URL hash before exchange', window.location.hash);
       
       try {
         // Step 1: Exchange URL tokens for session
@@ -29,11 +30,8 @@ export const AuthCallbackListener = () => {
           return;
         }
         
-        console.log('✅ Session from URL:', {
-          hasSession: !!urlSession,
-          hasUser: !!urlSession?.user,
-          userEmail: urlSession?.user?.email,
-          accessToken: urlSession?.access_token?.substring(0, 20) + '...',
+        console.log('Session from URL:', {
+          email: urlSession?.user?.email,
         });
         
         if (!mounted) return;
@@ -62,28 +60,20 @@ export const AuthCallbackListener = () => {
       
       const { data: { subscription } } = supabase.auth.onAuthStateChange(
         async (event, session) => {
-          console.log('🔔 Auth state change event:', {
-            event,
-            hasSession: !!session,
-            userEmail: session?.user?.email,
-            processed
-          });
+          console.log('🔔 Auth state change event:', event);
           
           if (processed || !mounted) return;
           
           if (event === 'SIGNED_IN' && session) {
             processed = true;
-            console.log('✅ SIGNED_IN event received:', {
-              userEmail: session.user?.email,
-              accessToken: session.access_token?.substring(0, 20) + '...'
-            });
+            console.log('Signed in via fallback listener');
             setStatus('Signed in successfully! Redirecting...');
             setTimeout(() => navigate('/app'), 500);
             return;
           }
-          
+
           if (event === 'SIGNED_OUT') {
-            console.log('❌ SIGNED_OUT event received');
+            console.log('Signed out detected');
             setStatus('Sign out detected');
             setTimeout(() => navigate('/?error=signed_out'), 1000);
             return;
@@ -96,13 +86,11 @@ export const AuthCallbackListener = () => {
       // Extended timeout fallback (30 seconds instead of 5)
       const timeout = setTimeout(() => {
         if (!processed && mounted) {
-          console.error('⏰ AuthCallbackListener: Extended timeout (30s) - no successful auth');
-          console.error('⏰ Final URL state:', window.location.href);
-          console.error('⏰ Final hash:', window.location.hash);
+          console.log('Authentication timeout reached');
           setStatus('Authentication timeout - please try again');
           setTimeout(() => navigate('/?error=auth_timeout_extended'), 2000);
         }
-      }, 30000); // 30 second timeout
+      }, 30000);
       
       return () => {
         subscription.unsubscribe();
@@ -111,10 +99,13 @@ export const AuthCallbackListener = () => {
     };
     
     // Start the auth handling process
-    handleAuth();
-    
+    handleAuth().then(fn => {
+      cleanup = fn;
+    });
+
     return () => {
       mounted = false;
+      cleanup?.();
     };
   }, [navigate]);
 

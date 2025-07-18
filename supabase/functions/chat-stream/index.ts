@@ -353,10 +353,10 @@ ${documentContext ?
       const errorText = await response.text();
       console.error('❌ OpenAI API error:', response.status, errorText);
       return new Response(
-        JSON.stringify({ error: `OpenAI API error: ${response.status} - ${errorText}` }),
-        { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        JSON.stringify({ error: errorText }),
+        {
+          status: response.status,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
       )
     }
