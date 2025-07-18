@@ -199,7 +199,11 @@ export const useSupabase = () => {
       }
 
       // Make direct fetch call for streaming support
-      const response = await fetch(`${supabase.supabaseUrl}/functions/v1/chat-stream`, {
+      const url = `https://npsqlaumhzzlqjtycpim.supabase.co/functions/v1/chat-stream`;
+      console.log('Sending message to:', url);
+      console.log('Request body:', { message, threadId, documentId });
+      
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
@@ -208,7 +212,12 @@ export const useSupabase = () => {
         body: JSON.stringify({ message, threadId, documentId }),
       });
 
+      console.log('Response status:', response.status);
+      console.log('Response headers:', response.headers);
+
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       if (!response.body) {
