@@ -12,6 +12,7 @@
    ```
    https://intel-chat-ai-analyzer.vercel.app/**
    https://intel-chat-ai-analyzer.vercel.app/app
+   https://intel-chat-ai-analyzer.vercel.app/auth/callback
    ```
 
 3. **Update Site URL (if needed)**

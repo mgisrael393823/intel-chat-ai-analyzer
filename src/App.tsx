@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Landing from "./pages/Landing";
 import App from "./pages/App";
 import NotFound from "./pages/NotFound";
+import { AuthCallback } from "./components/auth/AuthCallback";
 
 const queryClient = new QueryClient();
 
@@ -18,6 +19,7 @@ const AppWrapper = () => (
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/app" element={<App />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

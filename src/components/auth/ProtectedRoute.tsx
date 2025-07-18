@@ -22,100 +22,52 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
   useEffect(() => {
     let mounted = true;
-    let timeoutId: NodeJS.Timeout;
     
-    // Get initial session
-    const getSession = async () => {
-      console.log('ProtectedRoute: Getting initial session...');
-      console.log('Current URL:', window.location.href);
-      console.log('Hash params:', window.location.hash);
-      console.log('Search params:', window.location.search);
-      
-      // Check if we're in the middle of an auth callback
-      const isAuthCallback = window.location.hash.includes('access_token');
-      if (isAuthCallback) {
-        console.log('ProtectedRoute: Auth callback detected, waiting for Supabase to handle it...');
-        // Give Supabase time to process the auth callback
-        // The onAuthStateChange listener will handle the session
-        return;
-      }
-      
-      // Set a timeout to prevent infinite loading
-      timeoutId = setTimeout(() => {
-        if (mounted && isLoading) {
-          console.error('Session fetch timeout - forcing completion');
-          setIsLoading(false);
-          setUser(null);
-          setShowAuthModal(true);
-        }
-      }, 5000); // 5 second timeout
+    // Simple session check with quick timeout
+    const checkSession = async () => {
+      console.log('ProtectedRoute: Quick session check...');
       
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
-        console.log('ProtectedRoute: Session result:', { session, error });
         
         if (!mounted) return;
         
-        clearTimeout(timeoutId);
-        
         if (error) {
-          console.error('Session fetch error:', error);
+          console.error('Session error:', error);
           setUser(null);
-          setShowAuthModal(true);
         } else {
           setUser(session?.user ?? null);
-          if (!session?.user) {
-            setShowAuthModal(true);
-          }
         }
       } catch (err) {
-        console.error('Unexpected session error:', err);
-        // Log to remote monitoring in production
-        if (window.location.hostname !== 'localhost') {
-          console.error('[PROD ERROR] ProtectedRoute session fetch failed:', {
-            error: err,
-            timestamp: new Date().toISOString(),
-            url: window.location.href
-          });
-        }
+        console.error('Session check failed:', err);
         if (mounted) {
           setUser(null);
-          setShowAuthModal(true);
         }
       } finally {
         if (mounted) {
-          clearTimeout(timeoutId);
           setIsLoading(false);
+          if (!user) {
+            setShowAuthModal(true);
+          }
         }
       }
     };
 
-    // Listen for auth changes first
+    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('ProtectedRoute: Auth state change:', { event, session });
-        console.log('User from session:', session?.user);
+        console.log('ProtectedRoute: Auth state change:', { event, session?.user?.email });
         
         if (!mounted) return;
-        
-        // Clear any pending timeouts
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-        }
         
         setUser(session?.user ?? null);
         setIsLoading(false);
 
-        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-          console.log('ProtectedRoute: User signed in successfully');
+        if (event === 'SIGNED_IN') {
+          console.log('ProtectedRoute: User signed in');
           setShowAuthModal(false);
-          // Auto-create user profile if it doesn't exist
           if (session?.user) {
             await createUserProfileIfNeeded(session.user);
-          }
-          // Clean up URL after successful auth
-          if (window.location.hash.includes('access_token')) {
-            window.history.replaceState(null, '', window.location.pathname);
           }
         }
 
@@ -123,23 +75,23 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
           console.log('ProtectedRoute: User signed out');
           setShowAuthModal(true);
         }
-        
-        // Handle initial session from magic link
-        if (event === 'INITIAL_SESSION' && session) {
-          console.log('ProtectedRoute: Initial session detected');
-          setShowAuthModal(false);
-        }
       }
     );
     
-    // Then get the session
-    getSession();
+    // Quick session check with 2 second timeout
+    const timeoutId = setTimeout(() => {
+      if (mounted && isLoading) {
+        console.log('ProtectedRoute: Quick timeout - showing auth');
+        setIsLoading(false);
+        setShowAuthModal(true);
+      }
+    }, 2000);
+    
+    checkSession();
 
     return () => {
       mounted = false;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
+      clearTimeout(timeoutId);
       subscription.unsubscribe();
     };
   }, []);
@@ -172,21 +124,12 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   };
 
   if (isLoading) {
-    console.log('ProtectedRoute: Still loading...');
+    console.log('ProtectedRoute: Checking auth...');
     return fallback || (
       <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 flex items-center justify-center">
-        <div className="max-w-md w-full space-y-4 p-6 text-center">
-          <h2 className="text-xl font-semibold mb-4">Loading OM Intel Chat...</h2>
-          <p className="text-sm text-muted-foreground mb-4">Checking authentication status</p>
-          <div className="flex justify-center mb-4">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-          </div>
-          <Skeleton className="h-8 w-48 mx-auto" />
-          <Skeleton className="h-32 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <p className="text-xs text-muted-foreground mt-4">
-            Taking longer than expected? Check your internet connection.
-          </p>
+        <div className="text-center space-y-3">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+          <p className="text-sm text-muted-foreground">Loading...</p>
         </div>
       </div>
     );

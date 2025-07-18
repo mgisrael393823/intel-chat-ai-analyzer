@@ -27,8 +27,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     try {
       // Use production URL for deployed app, localhost for development
       const redirectUrl = window.location.hostname === 'localhost' 
-        ? `${window.location.origin}/app`
-        : 'https://intel-chat-ai-analyzer.vercel.app/app';
+        ? `${window.location.origin}/auth/callback`
+        : 'https://intel-chat-ai-analyzer.vercel.app/auth/callback';
 
       console.log('Magic link redirect URL:', redirectUrl);
       console.log('Current hostname:', window.location.hostname);
