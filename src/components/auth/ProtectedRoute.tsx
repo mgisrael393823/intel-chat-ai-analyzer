@@ -3,6 +3,7 @@ import { User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { AuthModal } from './AuthModal';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -16,6 +17,8 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  
+  console.log('ProtectedRoute render:', { user, isLoading, showAuthModal });
 
   useEffect(() => {
     // Get initial session
@@ -94,9 +97,11 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   };
 
   if (isLoading) {
+    console.log('ProtectedRoute: Still loading...');
     return fallback || (
       <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 flex items-center justify-center">
-        <div className="max-w-md w-full space-y-4 p-6">
+        <div className="max-w-md w-full space-y-4 p-6 text-center">
+          <h2 className="text-xl font-semibold mb-4">Loading...</h2>
           <Skeleton className="h-8 w-48 mx-auto" />
           <Skeleton className="h-32 w-full" />
           <Skeleton className="h-10 w-full" />
@@ -106,6 +111,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   }
 
   if (!user) {
+    console.log('ProtectedRoute: No user, showing auth screen');
     return (
       <>
         <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 flex items-center justify-center">
@@ -114,6 +120,15 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
             <p className="text-muted-foreground">
               Sign in to upload and analyze commercial real estate documents with AI.
             </p>
+            {/* Add a manual sign in button as backup */}
+            {!showAuthModal && (
+              <Button 
+                onClick={() => setShowAuthModal(true)}
+                className="mt-4"
+              >
+                Sign In with Email
+              </Button>
+            )}
           </div>
         </div>
         <AuthModal 
