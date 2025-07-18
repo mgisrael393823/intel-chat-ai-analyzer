@@ -20,7 +20,14 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   useEffect(() => {
     // Get initial session
     const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      console.log('ProtectedRoute: Getting initial session...');
+      console.log('Current URL:', window.location.href);
+      console.log('Hash params:', window.location.hash);
+      console.log('Search params:', window.location.search);
+      
+      const { data: { session }, error } = await supabase.auth.getSession();
+      console.log('ProtectedRoute: Session result:', { session, error });
+      
       setUser(session?.user ?? null);
       setIsLoading(false);
       
@@ -34,10 +41,14 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log('ProtectedRoute: Auth state change:', { event, session });
+        console.log('User from session:', session?.user);
+        
         setUser(session?.user ?? null);
         setIsLoading(false);
 
         if (event === 'SIGNED_IN') {
+          console.log('ProtectedRoute: User signed in successfully');
           setShowAuthModal(false);
           // Auto-create user profile if it doesn't exist
           if (session?.user) {
@@ -46,6 +57,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
         }
 
         if (event === 'SIGNED_OUT') {
+          console.log('ProtectedRoute: User signed out');
           setShowAuthModal(true);
         }
       }

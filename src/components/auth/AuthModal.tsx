@@ -30,6 +30,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         ? `${window.location.origin}/app`
         : 'https://intel-chat-ai-analyzer.vercel.app/app';
 
+      console.log('Magic link redirect URL:', redirectUrl);
+      console.log('Current hostname:', window.location.hostname);
+      console.log('Current origin:', window.location.origin);
+
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
