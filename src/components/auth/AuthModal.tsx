@@ -27,9 +27,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     setIsLoading(true);
     setMessage('');
 
+    // Clear any stale sessions first
+    await supabase.auth.signOut();
+
     try {
       if (isSignUp) {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
         });
@@ -37,6 +40,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         if (error) {
           setMessage(error.message);
           setIsSuccess(false);
+        } else if (data.user && !data.user.email_confirmed_at) {
+          setMessage('Please check your email and click the confirmation link, then try signing in.');
+          setIsSuccess(true);
+          setIsSignUp(false); // Switch to sign in mode
         } else {
           setMessage('Account created successfully!');
           setIsSuccess(true);
@@ -46,15 +53,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
           }, 1000);
         }
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
 
         if (error) {
-          setMessage(error.message);
+          // Provide more specific error messages
+          if (error.message.includes('Invalid login credentials')) {
+            setMessage('Invalid email or password. Please check your credentials and try again.');
+          } else if (error.message.includes('Email not confirmed')) {
+            setMessage('Please confirm your email address before signing in. Check your inbox for the confirmation link.');
+          } else {
+            setMessage(error.message);
+          }
           setIsSuccess(false);
-        } else {
+        } else if (data.user) {
           setMessage('Signed in successfully!');
           setIsSuccess(true);
           setTimeout(() => {
