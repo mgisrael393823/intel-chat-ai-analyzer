@@ -4,16 +4,28 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 }
 
 serve(async (req) => {
+  console.log('🚀 Chat-stream function called:', req.method, req.url);
+
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
+    console.log('📋 Handling CORS preflight request');
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
+    // Log request body first
+    const requestBody = await req.json();
+    console.log('📥 Request body:', requestBody);
+    
+    const { message, threadId, documentId } = requestBody;
+    console.log('📋 Parsed parameters:', { message, threadId, documentId });
+
     // Create Supabase client
+    console.log('🔧 Creating Supabase client...');
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
@@ -25,14 +37,18 @@ serve(async (req) => {
     )
 
     // Get the current user
+    console.log('👤 Getting current user...');
     const {
       data: { user },
       error: userError,
     } = await supabaseClient.auth.getUser()
 
-    if (userError || !user) {
+    console.log('👤 User result:', { user: user?.email, userError });
+
+    if (userError) {
+      console.error('❌ User authentication error:', userError);
       return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
+        JSON.stringify({ error: `Authentication error: ${userError.message}` }),
         { 
           status: 401, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -40,12 +56,22 @@ serve(async (req) => {
       )
     }
 
-    // Parse request body
-    const { message, threadId, documentId } = await req.json()
-
-    if (!message) {
+    if (!user) {
+      console.error('❌ No user found');
       return new Response(
-        JSON.stringify({ error: 'Message is required' }),
+        JSON.stringify({ error: 'No authenticated user found' }),
+        { 
+          status: 401, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      )
+    }
+
+    // Validate message
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
+      console.error('❌ Invalid message:', message);
+      return new Response(
+        JSON.stringify({ error: 'Message is required and must be a non-empty string' }),
         { 
           status: 400, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -54,39 +80,72 @@ serve(async (req) => {
     }
 
     // Get or create thread
-    let thread;
+    console.log('🧵 Looking for existing thread...');
+    let thread = null;
+    
     if (threadId) {
-      const { data: existingThread } = await supabaseClient
+      console.log('🔍 Searching for thread:', threadId);
+      const { data: existingThread, error: threadLookupError } = await supabaseClient
         .from('threads')
         .select('*')
         .eq('id', threadId)
         .eq('user_id', user.id)
         .single()
       
+      console.log('🔍 Thread lookup result:', { existingThread, threadLookupError });
+      
+      if (threadLookupError && threadLookupError.code !== 'PGRST116') {
+        console.error('❌ Thread lookup error:', threadLookupError);
+        return new Response(
+          JSON.stringify({ error: `Thread lookup failed: ${threadLookupError.message}` }),
+          { 
+            status: 500, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          }
+        )
+      }
+      
       thread = existingThread;
     }
 
     if (!thread) {
+      console.log('🆕 Creating new thread...');
       // Create new thread
       let threadTitle = 'General Chat';
       let threadDocumentId = null;
 
       if (documentId) {
+        console.log('📄 Fetching document for thread creation:', documentId);
         // Create new thread for this document
-        const { data: document } = await supabaseClient
+        const { data: document, error: documentError } = await supabaseClient
           .from('documents')
           .select('name')
           .eq('id', documentId)
           .eq('user_id', user.id)
           .single()
 
+        console.log('📄 Document fetch result:', { document, documentError });
+
+        if (documentError) {
+          console.error('❌ Document fetch error:', documentError);
+          return new Response(
+            JSON.stringify({ error: `Document not found: ${documentError.message}` }),
+            { 
+              status: 404, 
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+            }
+          )
+        }
+
         if (document) {
           threadTitle = `Analysis: ${document.name}`;
           threadDocumentId = documentId;
+          console.log('📄 Using document for thread:', threadTitle);
         }
       }
 
       // Create the thread (with or without document)
+      console.log('🆕 Creating thread with:', { threadTitle, threadDocumentId, userId: user.id });
       const { data: newThread, error: threadError } = await supabaseClient
         .from('threads')
         .insert({
@@ -97,10 +156,23 @@ serve(async (req) => {
         .select()
         .single()
       
-      if (threadError || !newThread) {
-        console.error('Thread creation error:', threadError);
+      console.log('🆕 Thread creation result:', { newThread, threadError });
+
+      if (threadError) {
+        console.error('❌ Thread creation error:', threadError);
         return new Response(
-          JSON.stringify({ error: 'Failed to create thread' }),
+          JSON.stringify({ error: `Failed to create thread: ${threadError.message}` }),
+          { 
+            status: 500, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          }
+        )
+      }
+
+      if (!newThread) {
+        console.error('❌ Thread creation returned null');
+        return new Response(
+          JSON.stringify({ error: 'Thread creation returned no data' }),
           { 
             status: 500, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -111,8 +183,11 @@ serve(async (req) => {
       thread = newThread;
     }
 
+    console.log('✅ Using thread:', thread.id, thread.title);
+
     // Save user message
-    const { data: userMessage } = await supabaseClient
+    console.log('💬 Saving user message...');
+    const { data: userMessage, error: messageError } = await supabaseClient
       .from('messages')
       .insert({
         thread_id: thread.id,
@@ -123,14 +198,40 @@ serve(async (req) => {
       .select()
       .single()
 
+    console.log('💬 User message save result:', { userMessage, messageError });
+
+    if (messageError) {
+      console.error('❌ Message save error:', messageError);
+      return new Response(
+        JSON.stringify({ error: `Failed to save message: ${messageError.message}` }),
+        { 
+          status: 500, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      )
+    }
+
     // Get document context if available
+    console.log('📚 Loading document context...');
     let documentContext = '';
     if (thread.document_id) {
-      const { data: document } = await supabaseClient
+      console.log('📄 Fetching document content:', thread.document_id);
+      const { data: document, error: docError } = await supabaseClient
         .from('documents')
         .select('extracted_text, name')
         .eq('id', thread.document_id)
         .single()
+
+      console.log('📄 Document content result:', { 
+        hasDocument: !!document, 
+        hasExtractedText: !!document?.extracted_text,
+        textLength: document?.extracted_text?.length,
+        docError 
+      });
+
+      if (docError) {
+        console.error('⚠️ Document context error (non-critical):', docError);
+      }
 
       if (document?.extracted_text) {
         documentContext = `
@@ -143,16 +244,29 @@ ${document.extracted_text}
 
 Based on this commercial real estate offering memorandum, please provide detailed analysis and answer the user's questions.
         `.trim()
+        console.log('📚 Document context loaded, length:', documentContext.length);
       }
+    } else {
+      console.log('📚 No document associated with thread');
     }
 
     // Get OpenAI API key
+    console.log('🔑 Getting OpenAI API key...');
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
     if (!openaiApiKey) {
-      throw new Error('OpenAI API key not configured')
+      console.error('❌ OpenAI API key not found in environment');
+      return new Response(
+        JSON.stringify({ error: 'OpenAI API key not configured' }),
+        { 
+          status: 500, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      )
     }
+    console.log('🔑 OpenAI API key found, length:', openaiApiKey.length);
 
     // Prepare messages for OpenAI
+    console.log('🧠 Preparing OpenAI messages...');
     const systemPrompt = `You are an expert commercial real estate analyst. You help investors analyze offering memoranda (OMs) and provide insights about commercial real estate deals.
 
 Key areas to focus on:
@@ -173,10 +287,12 @@ ${documentContext ?
 
     if (documentContext) {
       messages.push({ role: 'system', content: documentContext })
+      console.log('📚 Added document context to messages');
     }
 
     // Add recent conversation history
-    const { data: recentMessages } = await supabaseClient
+    console.log('📜 Loading conversation history...');
+    const { data: recentMessages, error: historyError } = await supabaseClient
       .from('messages')
       .select('role, content')
       .eq('thread_id', thread.id)
@@ -184,17 +300,37 @@ ${documentContext ?
       .order('created_at', { ascending: false })
       .limit(10)
 
-    if (recentMessages) {
+    console.log('📜 History result:', { 
+      messageCount: recentMessages?.length, 
+      historyError 
+    });
+
+    if (historyError) {
+      console.error('⚠️ History load error (non-critical):', historyError);
+    }
+
+    if (recentMessages && recentMessages.length > 0) {
       // Add in chronological order
       recentMessages.reverse().forEach(msg => {
         messages.push({ role: msg.role, content: msg.content })
       })
+      console.log('📜 Added', recentMessages.length, 'previous messages');
     }
 
     // Add current user message
     messages.push({ role: 'user', content: message })
 
+    console.log('🧠 Final message count:', messages.length);
+    console.log('🧠 OpenAI request payload:', {
+      model: 'gpt-4o-mini',
+      messageCount: messages.length,
+      stream: true,
+      max_tokens: 2000,
+      temperature: 0.7,
+    });
+
     // Create streaming response
+    console.log('🌊 Making OpenAI API call...');
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -210,11 +346,23 @@ ${documentContext ?
       }),
     })
 
+    console.log('🌊 OpenAI response status:', response.status);
+    console.log('🌊 OpenAI response headers:', Object.fromEntries(response.headers.entries()));
+
     if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status}`)
+      const errorText = await response.text();
+      console.error('❌ OpenAI API error:', response.status, errorText);
+      return new Response(
+        JSON.stringify({ error: `OpenAI API error: ${response.status} - ${errorText}` }),
+        { 
+          status: 500, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      )
     }
 
     // Set up Server-Sent Events
+    console.log('📡 Setting up streaming response...');
     const headers = {
       ...corsHeaders,
       'Content-Type': 'text/event-stream',
@@ -227,8 +375,9 @@ ${documentContext ?
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          console.log('🤖 Creating assistant message record...');
           // Create assistant message record
-          const { data: assistantMessage } = await supabaseClient
+          const { data: assistantMessage, error: assistantError } = await supabaseClient
             .from('messages')
             .insert({
               thread_id: thread.id,
@@ -239,7 +388,21 @@ ${documentContext ?
             .select()
             .single()
 
+          console.log('🤖 Assistant message result:', { assistantMessage, assistantError });
+
+          if (assistantError) {
+            console.error('❌ Assistant message creation error:', assistantError);
+            controller.enqueue(
+              new TextEncoder().encode(
+                `data: ${JSON.stringify({ type: 'error', error: `Failed to create assistant message: ${assistantError.message}` })}\n\n`
+              )
+            )
+            controller.close()
+            return
+          }
+
           // Send initial message with thread info
+          console.log('📤 Sending initial thread info...');
           controller.enqueue(
             new TextEncoder().encode(
               `data: ${JSON.stringify({ 
@@ -251,13 +414,26 @@ ${documentContext ?
           )
 
           const reader = response.body?.getReader()
-          if (!reader) throw new Error('No response body')
+          if (!reader) {
+            console.error('❌ No response body from OpenAI');
+            controller.enqueue(
+              new TextEncoder().encode(
+                `data: ${JSON.stringify({ type: 'error', error: 'No response body from OpenAI' })}\n\n`
+              )
+            )
+            controller.close()
+            return
+          }
 
           const decoder = new TextDecoder()
+          console.log('🌊 Starting to read OpenAI stream...');
 
           while (true) {
             const { done, value } = await reader.read()
-            if (done) break
+            if (done) {
+              console.log('✅ OpenAI stream completed');
+              break
+            }
 
             const chunk = decoder.decode(value)
             const lines = chunk.split('\n')
@@ -267,6 +443,7 @@ ${documentContext ?
                 const data = line.slice(6)
                 
                 if (data === '[DONE]') {
+                  console.log('🎯 OpenAI stream finished');
                   // Finalize assistant message
                   await supabaseClient
                     .from('messages')
@@ -306,12 +483,13 @@ ${documentContext ?
                   }
                 } catch (e) {
                   // Skip invalid JSON
+                  console.log('⚠️ Skipping invalid JSON chunk:', data.substring(0, 50));
                 }
               }
             }
           }
         } catch (error) {
-          console.error('Streaming error:', error)
+          console.error('💥 Streaming error:', error)
           controller.enqueue(
             new TextEncoder().encode(
               `data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`
@@ -322,12 +500,18 @@ ${documentContext ?
       },
     })
 
+    console.log('✅ Returning streaming response');
     return new Response(stream, { headers })
 
   } catch (error) {
-    console.error('Chat stream error:', error)
+    console.error('💥 Fatal error in chat-stream function:', error);
+    console.error('💥 Error stack:', error.stack);
     return new Response(
-      JSON.stringify({ error: 'Internal server error' }),
+      JSON.stringify({ 
+        error: 'Internal server error', 
+        details: error.message,
+        timestamp: new Date().toISOString()
+      }),
       { 
         status: 500, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
