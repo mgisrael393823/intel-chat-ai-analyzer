@@ -66,38 +66,49 @@ serve(async (req) => {
       thread = existingThread;
     }
 
-    if (!thread && documentId) {
-      // Create new thread for this document
-      const { data: document } = await supabaseClient
-        .from('documents')
-        .select('name')
-        .eq('id', documentId)
-        .eq('user_id', user.id)
-        .single()
-
-      if (document) {
-        const { data: newThread } = await supabaseClient
-          .from('threads')
-          .insert({
-            user_id: user.id,
-            document_id: documentId,
-            title: `Analysis: ${document.name}`,
-          })
-          .select()
-          .single()
-        
-        thread = newThread;
-      }
-    }
-
     if (!thread) {
-      return new Response(
-        JSON.stringify({ error: 'Thread not found or could not be created' }),
-        { 
-          status: 404, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      // Create new thread
+      let threadTitle = 'General Chat';
+      let threadDocumentId = null;
+
+      if (documentId) {
+        // Create new thread for this document
+        const { data: document } = await supabaseClient
+          .from('documents')
+          .select('name')
+          .eq('id', documentId)
+          .eq('user_id', user.id)
+          .single()
+
+        if (document) {
+          threadTitle = `Analysis: ${document.name}`;
+          threadDocumentId = documentId;
         }
-      )
+      }
+
+      // Create the thread (with or without document)
+      const { data: newThread, error: threadError } = await supabaseClient
+        .from('threads')
+        .insert({
+          user_id: user.id,
+          document_id: threadDocumentId,
+          title: threadTitle,
+        })
+        .select()
+        .single()
+      
+      if (threadError || !newThread) {
+        console.error('Thread creation error:', threadError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to create thread' }),
+          { 
+            status: 500, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          }
+        )
+      }
+
+      thread = newThread;
     }
 
     // Save user message
@@ -151,7 +162,10 @@ Key areas to focus on:
 - Investment risks and opportunities
 - Due diligence recommendations
 
-Provide clear, professional analysis with specific numbers when available. ${documentContext ? 'Use the provided document as your primary source.' : 'Ask for document upload if no context is provided.'}`
+${documentContext ? 
+  'Use the provided document as your primary source. Provide clear, professional analysis with specific numbers when available.' : 
+  'I can help you with general commercial real estate questions and analysis. For detailed document analysis, you can upload an offering memorandum and I\'ll provide specific insights based on that document.'
+}`
 
     const messages = [
       { role: 'system', content: systemPrompt },
