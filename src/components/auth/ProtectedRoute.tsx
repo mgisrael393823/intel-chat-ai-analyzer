@@ -21,6 +21,8 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   console.log('ProtectedRoute render:', { user, isLoading, showAuthModal });
 
   useEffect(() => {
+    let mounted = true;
+    
     // Get initial session
     const getSession = async () => {
       console.log('ProtectedRoute: Getting initial session...');
@@ -28,9 +30,23 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       console.log('Hash params:', window.location.hash);
       console.log('Search params:', window.location.search);
       
+      // Set a timeout to prevent infinite loading
+      const timeoutId = setTimeout(() => {
+        if (mounted && isLoading) {
+          console.error('Session fetch timeout - forcing completion');
+          setIsLoading(false);
+          setUser(null);
+          setShowAuthModal(true);
+        }
+      }, 5000); // 5 second timeout
+      
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
         console.log('ProtectedRoute: Session result:', { session, error });
+        
+        if (!mounted) return;
+        
+        clearTimeout(timeoutId);
         
         if (error) {
           console.error('Session fetch error:', error);
@@ -52,10 +68,15 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
             url: window.location.href
           });
         }
-        setUser(null);
-        setShowAuthModal(true);
+        if (mounted) {
+          setUser(null);
+          setShowAuthModal(true);
+        }
       } finally {
-        setIsLoading(false);
+        if (mounted) {
+          clearTimeout(timeoutId);
+          setIsLoading(false);
+        }
       }
     };
 
@@ -86,7 +107,10 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const createUserProfileIfNeeded = async (user: User) => {
@@ -121,10 +145,17 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return fallback || (
       <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 flex items-center justify-center">
         <div className="max-w-md w-full space-y-4 p-6 text-center">
-          <h2 className="text-xl font-semibold mb-4">Loading...</h2>
+          <h2 className="text-xl font-semibold mb-4">Loading OM Intel Chat...</h2>
+          <p className="text-sm text-muted-foreground mb-4">Checking authentication status</p>
+          <div className="flex justify-center mb-4">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
           <Skeleton className="h-8 w-48 mx-auto" />
           <Skeleton className="h-32 w-full" />
           <Skeleton className="h-10 w-full" />
+          <p className="text-xs text-muted-foreground mt-4">
+            Taking longer than expected? Check your internet connection.
+          </p>
         </div>
       </div>
     );
