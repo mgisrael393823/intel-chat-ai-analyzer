@@ -28,14 +28,34 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       console.log('Hash params:', window.location.hash);
       console.log('Search params:', window.location.search);
       
-      const { data: { session }, error } = await supabase.auth.getSession();
-      console.log('ProtectedRoute: Session result:', { session, error });
-      
-      setUser(session?.user ?? null);
-      setIsLoading(false);
-      
-      if (!session?.user) {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        console.log('ProtectedRoute: Session result:', { session, error });
+        
+        if (error) {
+          console.error('Session fetch error:', error);
+          setUser(null);
+          setShowAuthModal(true);
+        } else {
+          setUser(session?.user ?? null);
+          if (!session?.user) {
+            setShowAuthModal(true);
+          }
+        }
+      } catch (err) {
+        console.error('Unexpected session error:', err);
+        // Log to remote monitoring in production
+        if (window.location.hostname !== 'localhost') {
+          console.error('[PROD ERROR] ProtectedRoute session fetch failed:', {
+            error: err,
+            timestamp: new Date().toISOString(),
+            url: window.location.href
+          });
+        }
+        setUser(null);
         setShowAuthModal(true);
+      } finally {
+        setIsLoading(false);
       }
     };
 

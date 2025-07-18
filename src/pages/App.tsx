@@ -9,6 +9,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { useSupabase, Document } from '@/hooks/useSupabase';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
 interface UploadedFile {
   id: string;
@@ -245,9 +246,11 @@ const App = () => {
   );
 
   return (
-    <ProtectedRoute>
-      <AppContent />
-    </ProtectedRoute>
+    <ErrorBoundary>
+      <ProtectedRoute>
+        <AppContent />
+      </ProtectedRoute>
+    </ErrorBoundary>
   );
 };
 
