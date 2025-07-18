@@ -56,7 +56,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('ProtectedRoute: Auth state change:', { event, session?.user?.email });
+        console.log('ProtectedRoute: Auth state change:', { event, userEmail: session?.user?.email });
         
         if (!mounted) return;
         
