@@ -307,6 +307,33 @@ export const useSupabase = () => {
     }
   };
 
+  const generateSnapshot = async (documentId: string) => {
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        throw new Error('Authentication required');
+      }
+
+      const { data, error } = await supabase.functions.invoke('generate-snapshot', {
+        body: { documentId },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (error) {
+        console.error('Snapshot generation error:', error);
+        throw new Error(error.message || 'Failed to generate snapshot');
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Generate snapshot error:', error);
+      throw error;
+    }
+  };
+
   return { 
     uploadFile, 
     getDocument, 
@@ -316,6 +343,7 @@ export const useSupabase = () => {
     subscribeToDocumentChanges,
     sendMessage,
     getThreadMessages,
-    getUserThreads
+    getUserThreads,
+    generateSnapshot
   };
 };

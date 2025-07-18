@@ -1,7 +1,8 @@
 import React, { useCallback, useState } from 'react';
-import { Upload, File, X } from 'lucide-react';
+import { Upload, File, X, BarChart3 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { useSupabase } from '@/hooks/useSupabase';
 
 interface UploadedFile {
   id: string;
@@ -25,6 +26,8 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
   uploadProgress
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
+  const [generatingSnapshot, setGeneratingSnapshot] = useState<string | null>(null);
+  const { generateSnapshot } = useSupabase();
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes';
@@ -76,6 +79,21 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
     // For now, just log - file deletion should be handled through the parent component
     console.log('Remove file:', fileId);
     // TODO: Implement file deletion through parent component callback
+  };
+
+  const handleGenerateSnapshot = async (fileId: string) => {
+    setGeneratingSnapshot(fileId);
+    try {
+      const result = await generateSnapshot(fileId);
+      console.log('Snapshot generated:', result);
+      // TODO: Display snapshot in UI or open modal
+      alert(`Snapshot generated for ${result.documentName}!\n\nProperty: ${result.snapshot.propertyName}\nPrice: $${result.snapshot.askingPrice?.toLocaleString() || 'N/A'}\nCap Rate: ${result.snapshot.capRate || 'N/A'}%`);
+    } catch (error) {
+      console.error('Failed to generate snapshot:', error);
+      alert(`Failed to generate snapshot: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setGeneratingSnapshot(null);
+    }
   };
 
   return (
@@ -155,14 +173,35 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
                       </p>
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeFile(file.id)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleGenerateSnapshot(file.id)}
+                      disabled={generatingSnapshot === file.id}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-xs px-2 py-1 h-7"
+                    >
+                      {generatingSnapshot === file.id ? (
+                        <>
+                          <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-1" />
+                          Analyzing...
+                        </>
+                      ) : (
+                        <>
+                          <BarChart3 className="h-3 w-3 mr-1" />
+                          Snapshot
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeFile(file.id)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
