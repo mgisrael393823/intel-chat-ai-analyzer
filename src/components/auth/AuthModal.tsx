@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, Mail } from 'lucide-react';
+import { Loader2, Mail, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 
 interface AuthModalProps {
@@ -15,42 +15,53 @@ interface AuthModalProps {
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess }) => {
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [isSuccess, setIsSuccess] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
-  const handleMagicLink = async (e: React.FormEvent) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setMessage('');
 
     try {
-      // Use production URL for deployed app, localhost for development
-      const redirectUrl = window.location.hostname === 'localhost' 
-        ? `${window.location.origin}/auth/callback`
-        : 'https://intel-chat-ai-analyzer.vercel.app/auth/callback';
+      if (isSignUp) {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+        });
 
-      console.log('Magic link redirect URL:', redirectUrl);
-      console.log('Current hostname:', window.location.hostname);
-      console.log('Current origin:', window.location.origin);
-
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: redirectUrl,
-        },
-      });
-
-      if (error) {
-        setMessage(error.message);
-        setIsSuccess(false);
+        if (error) {
+          setMessage(error.message);
+          setIsSuccess(false);
+        } else {
+          setMessage('Account created successfully!');
+          setIsSuccess(true);
+          setTimeout(() => {
+            onClose();
+            onSuccess?.();
+          }, 1000);
+        }
       } else {
-        setMessage('Check your email for the magic link!');
-        setIsSuccess(true);
-        setTimeout(() => {
-          onClose();
-          onSuccess?.();
-        }, 2000);
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (error) {
+          setMessage(error.message);
+          setIsSuccess(false);
+        } else {
+          setMessage('Signed in successfully!');
+          setIsSuccess(true);
+          setTimeout(() => {
+            onClose();
+            onSuccess?.();
+          }, 1000);
+        }
       }
     } catch (err) {
       setMessage('An unexpected error occurred');
@@ -62,8 +73,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
   const handleClose = () => {
     setEmail('');
+    setPassword('');
     setMessage('');
     setIsSuccess(false);
+    setIsSignUp(false);
+    setShowPassword(false);
     onClose();
   };
 
@@ -73,11 +87,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Mail className="w-5 h-5" />
-            Sign in to OM Intel Chat
+            {isSignUp ? 'Create Account' : 'Sign In'} - OM Intel Chat
           </DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleMagicLink} className="space-y-4">
+        <form onSubmit={handleAuth} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Email Address</Label>
             <Input
@@ -91,6 +105,41 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             />
           </div>
 
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <div className="relative">
+              <Input
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                disabled={isLoading}
+                minLength={6}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                onClick={() => setShowPassword(!showPassword)}
+                disabled={isLoading}
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+            {isSignUp && (
+              <p className="text-xs text-muted-foreground">
+                Password must be at least 6 characters long
+              </p>
+            )}
+          </div>
+
           {message && (
             <Alert>
               <AlertDescription className={isSuccess ? 'text-green-600' : 'text-red-600'}>
@@ -102,21 +151,36 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
           <Button 
             type="submit" 
             className="w-full" 
-            disabled={isLoading || !email}
+            disabled={isLoading || !email || !password}
           >
             {isLoading ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Sending Magic Link...
+                {isSignUp ? 'Creating Account...' : 'Signing In...'}
               </>
             ) : (
-              'Send Magic Link'
+              isSignUp ? 'Create Account' : 'Sign In'
             )}
           </Button>
 
-          <p className="text-sm text-muted-foreground text-center">
-            We'll send you a secure link to sign in without a password.
-          </p>
+          <div className="text-center">
+            <Button
+              type="button"
+              variant="link"
+              onClick={() => {
+                setIsSignUp(!isSignUp);
+                setMessage('');
+                setPassword('');
+              }}
+              disabled={isLoading}
+              className="text-sm"
+            >
+              {isSignUp 
+                ? 'Already have an account? Sign in' 
+                : "Don't have an account? Create one"
+              }
+            </Button>
+          </div>
         </form>
       </DialogContent>
     </Dialog>
