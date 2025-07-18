@@ -25,10 +25,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     setMessage('');
 
     try {
+      // Use production URL for deployed app, localhost for development
+      const redirectUrl = window.location.hostname === 'localhost' 
+        ? `${window.location.origin}/app`
+        : 'https://intel-chat-ai-analyzer.vercel.app/app';
+
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
-          emailRedirectTo: `${window.location.origin}/app`,
+          emailRedirectTo: redirectUrl,
         },
       });
 
