@@ -175,8 +175,19 @@ serve(async (req) => {
         document_id: documentData.id,
       })
 
-    // TODO: Trigger PDF text extraction function
-    // This would call another edge function to extract text from the PDF
+    // Trigger PDF text extraction in the background
+    const { error: extractError } = await supabaseClient.functions.invoke('extract-pdf-text', {
+      body: { documentId: documentData.id },
+      headers: {
+        // Pass through the same auth header so the function can verify the user
+        Authorization: req.headers.get('Authorization')!,
+        'Content-Type': 'application/json'
+      }
+    })
+
+    if (extractError) {
+      console.error('Text extraction trigger error:', extractError)
+    }
 
     return new Response(
       JSON.stringify({

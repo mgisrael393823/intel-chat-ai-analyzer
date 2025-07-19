@@ -64,6 +64,24 @@ This project is built with:
 
 Simply open [Lovable](https://lovable.dev/projects/9e5e2aea-1cf6-4db3-9f6f-d22c90b5d2f5) and click on Share -> Publish.
 
+## Local Testing
+
+Use the included scripts to verify the backend integrations:
+
+### PDF text extraction
+
+```bash
+npx tsx test-pdf-extraction.ts [document-id]
+```
+
+If no `document-id` is provided the script will use your most recent upload.
+
+### OpenAI chat
+
+```bash
+npx tsx test-openai.ts
+```
+
 ## Can I connect a custom domain to my Lovable project?
 
 Yes, you can!
