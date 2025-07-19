@@ -239,6 +239,7 @@ export const useSupabase = () => {
     message: string, 
     threadId?: string, 
     documentId?: string,
+    onStreamStart?: () => void,
     onChunk?: (content: string) => void,
     onComplete?: (threadId: string, messageId: string) => void,
     onError?: (error: string) => void
@@ -265,59 +266,106 @@ export const useSupabase = () => {
       });
 
       console.log('Response status:', response.status);
-      console.log('Response headers:', response.headers);
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
 
+      // Enhanced error handling - return error immediately instead of throwing
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Error response:', errorText);
-        throw new Error(`HTTP error! status: ${response.status}`);
+        console.error('❌ API Error response:', response.status, errorText);
+        
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error || errorMessage;
+        } catch {
+          errorMessage = errorText || errorMessage;
+        }
+        
+        onError?.(errorMessage);
+        return;
       }
+      
       if (!response.body) {
-        throw new Error('No response body');
+        console.error('❌ No response body from API');
+        onError?.('No response body received from server');
+        return;
       }
+
+      console.log('✅ Response OK, starting stream processing...');
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
 
       let currentThreadId = threadId;
       let currentMessageId: string | undefined;
+      let streamStarted = false;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            console.log('📡 Stream reading completed');
+            break;
+          }
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n');
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            
-            try {
-              const parsed = JSON.parse(data);
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
               
-              switch (parsed.type) {
-                case 'thread':
-                  currentThreadId = parsed.threadId;
-                  currentMessageId = parsed.messageId;
-                  break;
-                case 'content':
-                  onChunk?.(parsed.content);
-                  break;
-                case 'done':
-                  if (currentThreadId && currentMessageId) {
-                    onComplete?.(currentThreadId, currentMessageId);
-                  }
-                  return;
-                case 'error':
-                  onError?.(parsed.error);
-                  return;
+              try {
+                const parsed = JSON.parse(data);
+                console.log('📦 Parsed SSE data:', parsed);
+                
+                switch (parsed.type) {
+                  case 'thread':
+                    currentThreadId = parsed.threadId;
+                    currentMessageId = parsed.messageId;
+                    console.log('🧵 Thread info received:', { currentThreadId, currentMessageId });
+                    
+                    // Call onStreamStart when we get the first valid data
+                    if (!streamStarted) {
+                      streamStarted = true;
+                      console.log('🚀 Calling onStreamStart');
+                      onStreamStart?.();
+                    }
+                    break;
+                    
+                  case 'content':
+                    // Also call onStreamStart on first content chunk
+                    if (!streamStarted) {
+                      streamStarted = true;
+                      console.log('🚀 Calling onStreamStart (content)');
+                      onStreamStart?.();
+                    }
+                    onChunk?.(parsed.content);
+                    break;
+                    
+                  case 'done':
+                    console.log('✅ Stream done signal received');
+                    if (currentThreadId && currentMessageId) {
+                      onComplete?.(currentThreadId, currentMessageId);
+                    }
+                    return;
+                    
+                  case 'error':
+                    console.error('❌ Stream error signal:', parsed.error);
+                    onError?.(parsed.error);
+                    return;
+                }
+              } catch (e) {
+                console.warn('⚠️ Failed to parse SSE JSON:', data.substring(0, 100), e);
+                // Skip invalid JSON but continue processing
               }
-            } catch (e) {
-              // Skip invalid JSON
             }
           }
         }
+      } catch (streamError) {
+        console.error('❌ Stream reading error:', streamError);
+        onError?.(streamError instanceof Error ? streamError.message : 'Stream processing failed');
+        return;
       }
     } catch (error) {
       console.error('Send message error:', error);

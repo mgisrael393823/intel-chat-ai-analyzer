@@ -5,6 +5,7 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Credentials': 'true',
 }
 
 serve(async (req) => {
@@ -329,36 +330,74 @@ ${documentContext ?
       temperature: 0.7,
     });
 
-    // Create streaming response
+    // Create streaming response with enhanced error handling
     console.log('🌊 Making OpenAI API call...');
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openaiApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: messages,
-        stream: true,
-        max_tokens: 2000,
-        temperature: 0.7,
-      }),
-    })
+    let response: Response;
+    
+    try {
+      response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: messages,
+          stream: true,
+          max_tokens: 2000,
+          temperature: 0.7,
+        }),
+      });
+    } catch (fetchError) {
+      console.error('❌ OpenAI fetch failed:', fetchError);
+      return new Response(
+        JSON.stringify({ 
+          error: 'Failed to connect to OpenAI API', 
+          details: fetchError.message,
+          timestamp: new Date().toISOString()
+        }),
+        { 
+          status: 500, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      );
+    }
 
     console.log('🌊 OpenAI response status:', response.status);
     console.log('🌊 OpenAI response headers:', Object.fromEntries(response.headers.entries()));
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ OpenAI API error:', response.status, errorText);
+      let errorText: string;
+      let errorDetails: any = {};
+      
+      try {
+        errorText = await response.text();
+        console.error('❌ OpenAI API error response body:', errorText);
+        
+        // Try to parse error as JSON for better error messages
+        try {
+          errorDetails = JSON.parse(errorText);
+          console.error('❌ Parsed OpenAI error:', errorDetails);
+        } catch {
+          // Not JSON, use raw text
+        }
+      } catch (readError) {
+        console.error('❌ Failed to read OpenAI error response:', readError);
+        errorText = 'Failed to read error response';
+      }
+      
       return new Response(
-        JSON.stringify({ error: errorText }),
+        JSON.stringify({ 
+          error: errorDetails.error?.message || errorText || 'OpenAI API error',
+          status: response.status,
+          timestamp: new Date().toISOString()
+        }),
         {
           status: response.status,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
-      )
+      );
     }
 
     // Set up Server-Sent Events

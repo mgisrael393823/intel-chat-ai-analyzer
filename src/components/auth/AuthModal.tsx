@@ -28,7 +28,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     setMessage('');
 
     // Clear any stale sessions first
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.log('Sign out error (non-critical):', err);
+    }
+
+    // Add timeout
+    const timeoutId = setTimeout(() => {
+      setIsLoading(false);
+      setMessage('Authentication is taking too long. Please try again.');
+      setIsSuccess(false);
+    }, 10000); // 10 second timeout
 
     try {
       if (isSignUp) {
@@ -53,10 +64,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
           }, 1000);
         }
       } else {
+        console.log('Attempting sign in for:', email);
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
+        console.log('Sign in response:', { data, error });
 
         if (error) {
           // Provide more specific error messages
@@ -78,9 +91,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         }
       }
     } catch (err) {
-      setMessage('An unexpected error occurred');
+      console.error('Auth error:', err);
+      setMessage('An unexpected error occurred. Please check the console for details.');
       setIsSuccess(false);
     } finally {
+      clearTimeout(timeoutId);
       setIsLoading(false);
     }
   };

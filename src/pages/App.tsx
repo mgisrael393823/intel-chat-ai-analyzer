@@ -33,7 +33,8 @@ const App = () => {
     getUserDocuments, 
     sendMessage, 
     getThreadMessages,
-    subscribeToDocumentChanges 
+    subscribeToDocumentChanges,
+    extractPdfText
   } = useSupabase();
 
   // Load user documents on mount
@@ -65,17 +66,64 @@ const App = () => {
 
     try {
       for (const file of files) {
+        console.log('📄 Uploading file:', file.name);
         const document = await uploadFile(file);
         setUploadedDocuments(prev => [...prev, document]);
         
-        // Add success message
-        const successMessage: Message = {
+        // Add upload success message
+        const uploadMessage: Message = {
           id: Date.now().toString(),
-          content: `Great! I've uploaded "${document.name}" and it's being processed. You can start asking me questions about this offering memorandum while I extract the text.`,
+          content: `✅ Uploaded "${document.name}" successfully! Starting text extraction...`,
           role: 'assistant',
           timestamp: new Date()
         };
-        setMessages(prev => [...prev, successMessage]);
+        setMessages(prev => [...prev, uploadMessage]);
+
+        // Start PDF text extraction automatically
+        console.log('🔄 Starting PDF text extraction for:', document.id);
+        try {
+          const extractionSuccess = await extractPdfText(document.id);
+          
+          if (extractionSuccess) {
+            console.log('✅ PDF text extraction completed');
+            // Update document status in local state
+            setUploadedDocuments(prev => 
+              prev.map(doc => 
+                doc.id === document.id 
+                  ? { ...doc, status: 'ready' }
+                  : doc
+              )
+            );
+            
+            // Add extraction success message
+            const readyMessage: Message = {
+              id: (Date.now() + 1).toString(),
+              content: `🎉 Perfect! "${document.name}" has been processed and is ready for analysis. Ask me anything about this offering memorandum!`,
+              role: 'assistant',
+              timestamp: new Date()
+            };
+            setMessages(prev => [...prev, readyMessage]);
+          } else {
+            console.error('❌ PDF text extraction failed');
+            // Add extraction failure message
+            const errorMessage: Message = {
+              id: (Date.now() + 1).toString(),
+              content: `⚠️ I uploaded "${document.name}" but had trouble extracting the text. You can still try asking questions, but I might not have full access to the document content.`,
+              role: 'assistant',
+              timestamp: new Date()
+            };
+            setMessages(prev => [...prev, errorMessage]);
+          }
+        } catch (extractError) {
+          console.error('❌ PDF extraction error:', extractError);
+          const extractErrorMessage: Message = {
+            id: (Date.now() + 2).toString(),
+            content: `❌ There was an error processing "${document.name}": ${extractError instanceof Error ? extractError.message : 'Unknown error'}`,
+            role: 'assistant',
+            timestamp: new Date()
+          };
+          setMessages(prev => [...prev, extractErrorMessage]);
+        }
       }
       
       setUploadProgress(100);
@@ -104,29 +152,45 @@ const App = () => {
     };
     setMessages(prev => [...prev, userMessage]);
 
-    // Start streaming
-    setIsStreaming(true);
-    setStreamingMessage('');
-
-    // Create temporary assistant message for streaming
+    // Create temporary assistant message for streaming (but don't start streaming state yet)
     const tempAssistantMessage: Message = {
       id: (Date.now() + 1).toString(),
       content: '',
       role: 'assistant',
       timestamp: new Date(),
-      status: 'streaming'
+      status: 'pending' // Start as pending, not streaming
     };
     setMessages(prev => [...prev, tempAssistantMessage]);
 
     // Get the most recent document for context
     const documentId = uploadedDocuments.length > 0 ? uploadedDocuments[0].id : undefined;
 
+    let streamStarted = false;
+
     await sendMessage(
       content,
       currentThreadId,
       documentId,
+      // onStreamStart - called when streaming actually begins
+      () => {
+        if (!streamStarted) {
+          streamStarted = true;
+          console.log('🌊 Stream started - setting isStreaming to true');
+          setIsStreaming(true);
+          setStreamingMessage('');
+          // Update message status to streaming
+          setMessages(prevMessages => 
+            prevMessages.map(msg => 
+              msg.id === tempAssistantMessage.id 
+                ? { ...msg, status: 'streaming' }
+                : msg
+            )
+          );
+        }
+      },
       // onChunk - append streaming content
       (chunk: string) => {
+        console.log('📝 Received chunk:', chunk);
         setStreamingMessage(prev => prev + chunk);
         setMessages(prevMessages => 
           prevMessages.map(msg => 
@@ -138,6 +202,7 @@ const App = () => {
       },
       // onComplete - finalize message
       (threadId: string, messageId: string) => {
+        console.log('✅ Stream completed');
         setCurrentThreadId(threadId);
         setIsStreaming(false);
         setStreamingMessage('');
@@ -153,6 +218,7 @@ const App = () => {
       },
       // onError - handle errors
       (error: string) => {
+        console.error('❌ Stream error:', error);
         setIsStreaming(false);
         setStreamingMessage('');
         
