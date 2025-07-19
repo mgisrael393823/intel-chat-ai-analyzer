@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-// Use pdf-parse for PDF text extraction
+// Use pdf-parse for PDF text extraction with fallback
 import pdf from 'https://esm.sh/pdf-parse@1.1.1'
 
 const corsHeaders = {
@@ -86,18 +86,55 @@ serve(async (req) => {
       
       console.log('🔄 Extracting text from PDF...');
       
-      // Extract text using pdf-parse
-      const data = await pdf(uint8Array, {
-        // Options for pdf-parse
-        max: 0, // 0 = parse all pages
-        version: 'v1.10.100' // Specify pdf2json version
-      });
+      let extractedText = '';
+      
+      try {
+        // Primary method: Extract text using pdf-parse
+        const data = await pdf(uint8Array, {
+          // Options for pdf-parse
+          max: 0, // 0 = parse all pages
+        });
 
-      const extractedText = data.text;
-      console.log('✅ Text extraction completed, length:', extractedText.length, 'characters');
+        extractedText = data.text;
+        console.log('✅ Primary extraction completed, length:', extractedText.length, 'characters');
+        
+      } catch (pdfParseError) {
+        console.error('❌ Primary PDF extraction failed:', pdfParseError);
+        
+        // Fallback method: Try with different options
+        try {
+          console.log('🔄 Trying fallback extraction method...');
+          const fallbackData = await pdf(uint8Array, {
+            max: 50, // Limit to first 50 pages if it's a large PDF
+            normalize: true,
+          });
+          
+          extractedText = fallbackData.text;
+          console.log('✅ Fallback extraction completed, length:', extractedText.length, 'characters');
+          
+        } catch (fallbackError) {
+          console.error('❌ Fallback extraction also failed:', fallbackError);
+          
+          // Final fallback: Create a basic text placeholder
+          extractedText = `PDF Document: ${document.name}
+
+This document was uploaded but text extraction encountered technical difficulties.
+The file is available for analysis, but some features may be limited.
+
+File details:
+- Name: ${document.name}
+- Size: ${document.size} bytes
+- Type: ${document.type}
+- Upload Date: ${new Date().toLocaleDateString()}
+
+You can still ask questions about this document, and I'll do my best to help based on the filename and general commercial real estate knowledge.`;
+
+          console.log('⚠️ Using placeholder text due to extraction failures');
+        }
+      }
       
       if (!extractedText || extractedText.trim().length === 0) {
-        throw new Error('No text could be extracted from the PDF');
+        throw new Error('No text could be extracted from the PDF after all attempts');
       }
 
       // Clean up the extracted text

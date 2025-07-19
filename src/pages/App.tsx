@@ -116,9 +116,19 @@ const App = () => {
           }
         } catch (extractError) {
           console.error('❌ PDF extraction error:', extractError);
+          
+          // Log detailed error information for debugging
+          if (extractError instanceof Error) {
+            console.error('Error details:', {
+              message: extractError.message,
+              stack: extractError.stack,
+              name: extractError.name
+            });
+          }
+          
           const extractErrorMessage: Message = {
             id: (Date.now() + 2).toString(),
-            content: `❌ There was an error processing "${document.name}": ${extractError instanceof Error ? extractError.message : 'Unknown error'}`,
+            content: `❌ There was an error processing "${document.name}": ${extractError instanceof Error ? extractError.message : 'Unknown error'}. Please check the browser console for detailed error information.`,
             role: 'assistant',
             timestamp: new Date()
           };
