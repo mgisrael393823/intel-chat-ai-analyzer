@@ -243,28 +243,55 @@ export const useSupabase = () => {
     onComplete?: (threadId: string, messageId: string) => void,
     onError?: (error: string) => void
   ): Promise<void> => {
+    console.log('🛠️ sendMessage called with:', { message, threadId, documentId });
+    console.log('🚨 DEBUGGING: sendMessage function started - timestamp:', Date.now());
+    
     try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      console.log('🔍 [SEND MESSAGE ENTRY] - inside try block');
       
-      if (sessionError || !session) {
-        throw new Error('Authentication required');
+      // Try getting the session from localStorage directly
+      console.log('… attempting to get session from localStorage');
+      const storageKey = `sb-${supabase.supabaseUrl.split('//')[1].split('.')[0]}-auth-token`;
+      console.log('Storage key:', storageKey);
+      
+      const storedSession = localStorage.getItem(storageKey);
+      console.log('Stored session exists:', !!storedSession);
+      
+      let token: string | undefined;
+      
+      if (storedSession) {
+        try {
+          const parsed = JSON.parse(storedSession);
+          token = parsed?.access_token;
+          console.log('✅ Got token from localStorage:', token?.slice(0,20) + '...');
+        } catch (e) {
+          console.error('Failed to parse stored session:', e);
+        }
       }
+      
+      if (!token) {
+        console.log('⚠️ No token in localStorage, falling back to anon key');
+        token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wc3FsYXVtaHp6bHFqdHljcGltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI3MDAzMzAsImV4cCI6MjA2ODI3NjMzMH0.i_dRSQj_l5bpzHjKMeq58QjWwoa8Y2QikeZrav8-rxo";
+      }
+      
+      console.log('✅ Proceeding to fetch with token');
 
       // Make direct fetch call for streaming support
       const url = `https://npsqlaumhzzlqjtycpim.supabase.co/functions/v1/chat-stream`;
       console.log('Sending message to:', url);
       console.log('Request body:', { message, threadId, documentId });
       
+      console.log('→ about to fetch /chat-stream');
       const response = await fetch(url, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ message, threadId, documentId }),
       });
 
-      console.log('Response status:', response.status);
+      console.log('← fetch returned', response.status);
       console.log('Response headers:', response.headers);
 
       if (!response.ok) {
@@ -320,7 +347,9 @@ export const useSupabase = () => {
         }
       }
     } catch (error) {
-      console.error('Send message error:', error);
+      console.error('💥 sendMessage unexpected error:', error);
+      console.error('💥 Error stack:', error instanceof Error ? error.stack : 'No stack');
+      console.error('💥 Error type:', typeof error, error);
       onError?.(error instanceof Error ? error.message : 'Failed to send message');
     }
   };

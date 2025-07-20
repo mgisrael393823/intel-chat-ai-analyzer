@@ -37,18 +37,19 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
           setUser(null);
         } else {
           setUser(session?.user ?? null);
+          if (!session?.user) {
+            setShowAuthModal(true);
+          }
         }
       } catch (err) {
         console.error('Session check failed:', err);
         if (mounted) {
           setUser(null);
+          setShowAuthModal(true);
         }
       } finally {
         if (mounted) {
           setIsLoading(false);
-          if (!user) {
-            setShowAuthModal(true);
-          }
         }
       }
     };

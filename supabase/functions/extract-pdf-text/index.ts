@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+// Use pdf-parse for PDF text extraction with fallback
+import pdf from 'https://esm.sh/pdf-parse@1.1.1'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -70,56 +72,34 @@ serve(async (req) => {
         throw new Error('Failed to download PDF file')
       }
 
-      // TODO: Implement PDF text extraction
-      // For now, we'll simulate text extraction
-      // In a real implementation, you would use a library like pdf-parse
-      // or call an external service for PDF text extraction
+      // Convert file to buffer for pdf-parse
+      const buffer = await fileData.arrayBuffer()
       
-      const simulatedText = `
-OFFERING MEMORANDUM
-
-Property: Commercial Real Estate Investment
-Location: Sample Address
-Type: Multi-family residential complex
-
-EXECUTIVE SUMMARY
-This offering memorandum presents an investment opportunity in a well-positioned commercial real estate asset.
-
-FINANCIAL HIGHLIGHTS
-- Gross Annual Income: $2,400,000
-- Net Operating Income: $1,800,000
-- Cap Rate: 6.5%
-- Occupancy Rate: 95%
-
-PROPERTY DETAILS
-- Total Units: 120
-- Year Built: 2010
-- Building Size: 150,000 sq ft
-- Parking Spaces: 150
-
-INVESTMENT HIGHLIGHTS
-- Prime location with excellent demographics
-- Strong rental growth potential
-- Professional property management in place
-- Recent capital improvements completed
-
-RISK FACTORS
-- Market volatility
-- Interest rate fluctuations
-- Tenant concentration risk
-- Capital expenditure requirements
-
-This is a simulated extraction. Actual PDF content would be extracted here.
-      `.trim()
+      // Extract text from PDF using pdf-parse
+      let extractedText: string
+      try {
+        const data = await pdf(buffer)
+        extractedText = data.text
+        console.log('PDF extraction successful, text length:', extractedText.length)
+      } catch (pdfError) {
+        console.error('PDF parsing error:', pdfError)
+        // Fallback to error handling
+        throw new Error('Failed to parse PDF content')
+      }
+      
+      // Validate extracted text
+      if (!extractedText || extractedText.trim().length === 0) {
+        throw new Error('No text content found in PDF')
+      }
 
       // Implement smart chunking for AI context (6000 tokens with 500 overlap)
-      const chunks = chunkText(simulatedText, 6000, 500)
+      const chunks = chunkText(extractedText, 6000, 500)
 
       // Update document with extracted text
       const { error: updateError } = await supabaseClient
         .from('documents')
         .update({
-          extracted_text: simulatedText,
+          extracted_text: extractedText,
           status: 'ready'
         })
         .eq('id', documentId)
@@ -132,7 +112,7 @@ This is a simulated extraction. Actual PDF content would be extracted here.
         JSON.stringify({
           success: true,
           message: 'PDF text extracted successfully',
-          textLength: simulatedText.length,
+          textLength: extractedText.length,
           chunks: chunks.length
         }),
         {

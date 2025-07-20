@@ -32,10 +32,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   }, [message]);
 
   const handleSubmit = (e: React.FormEvent) => {
+    console.log('📝 ChatInput.handleSubmit called with:', { message: message.trim(), disabled, isStreaming });
     e.preventDefault();
     if (message.trim() && !disabled) {
+      console.log('📤 Calling onSendMessage with:', message.trim());
       onSendMessage(message.trim());
       setMessage('');
+    } else {
+      console.log('❌ Message send blocked:', { hasMessage: !!message.trim(), disabled, isStreaming });
     }
   };
 

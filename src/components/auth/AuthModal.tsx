@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -27,8 +27,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     setIsLoading(true);
     setMessage('');
 
-    // Clear any stale sessions first
-    await supabase.auth.signOut();
+    // Clear any stale sessions first for sign up only
+    if (isSignUp) {
+      await supabase.auth.signOut();
+    }
 
     try {
       if (isSignUp) {
@@ -103,6 +105,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             <Mail className="w-5 h-5" />
             {isSignUp ? 'Create Account' : 'Sign In'} - OM Intel Chat
           </DialogTitle>
+          <DialogDescription>
+            {isSignUp 
+              ? 'Create a new account to start analyzing your offering memoranda' 
+              : 'Sign in to your account to access your documents and chat history'
+            }
+          </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleAuth} className="space-y-4">

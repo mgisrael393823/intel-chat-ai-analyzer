@@ -95,6 +95,8 @@ const App = () => {
   };
 
   const handleSendMessage = async (content: string) => {
+    console.log('🎯 App.handleSendMessage called with:', content);
+    
     // Add user message immediately
     const userMessage: Message = {
       id: Date.now().toString(),

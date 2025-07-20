@@ -34,7 +34,7 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, isStreamin
     }
   }, [messages, lastScrollTop]);
 
-  const handleScroll = (e: any) => {
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const scrollTop = e.target.scrollTop;
     setLastScrollTop(scrollTop);
     
