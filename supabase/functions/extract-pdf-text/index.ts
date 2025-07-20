@@ -1,7 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-// Use pdf-parse for PDF text extraction with fallback
-import pdf from 'https://esm.sh/pdf-parse@1.1.1'
+// Import pdfjs-dist for faster WebAssembly-based parsing
+import * as pdfjsLib from 'https://esm.sh/pdfjs-dist@3.11.174/build/pdf.min.mjs'
+import pdfjsWorker from 'https://esm.sh/pdfjs-dist@3.11.174/build/pdf.worker.min.mjs?worker'
+
+// Configure PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -72,19 +76,121 @@ serve(async (req) => {
         throw new Error('Failed to download PDF file')
       }
 
-      // Convert file to buffer for pdf-parse
+      // Convert file to buffer for parsing
       const buffer = await fileData.arrayBuffer()
+      const uint8Array = new Uint8Array(buffer)
       
-      // Extract text from PDF using pdf-parse
-      let extractedText: string
+      // Configuration for optimized extraction
+      const MAX_PAGES = 10
+      const MAX_CHARS = 100000
+      const FINANCIAL_KEYWORDS = [
+        /\b(noi|net\s+operating\s+income)\b/i,
+        /\b(cap\s+rate|capitalization\s+rate)\b/i,
+        /\b(rent\s+roll)\b/i,
+        /\b(financial\s+(highlights|summary))\b/i,
+        /\b(income\s+statement)\b/i,
+        /\b(cash\s+flow)\b/i,
+        /\b(returns?\s+analysis)\b/i,
+        /\b(irr|internal\s+rate\s+of\s+return)\b/i,
+      ]
+      
+      let extractedText = ''
+      let totalChars = 0
+      const foundSections = new Set<string>()
+      
       try {
-        const data = await pdf(buffer)
-        extractedText = data.text
-        console.log('PDF extraction successful, text length:', extractedText.length)
+        console.log('Starting optimized WebAssembly PDF extraction...')
+        const startTime = Date.now()
+        
+        // Load PDF document with pdfjs-dist
+        const loadingTask = pdfjsLib.getDocument({ data: uint8Array })
+        const pdfDoc = await loadingTask.promise
+        const numPages = Math.min(pdfDoc.numPages, MAX_PAGES)
+        
+        console.log(`Processing ${numPages} of ${pdfDoc.numPages} pages...`)
+        
+        // Extract text page by page with streaming updates
+        for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+          if (totalChars >= MAX_CHARS) {
+            console.log(`Character limit reached at page ${pageNum}`)
+            break
+          }
+          
+          const page = await pdfDoc.getPage(pageNum)
+          const textContent = await page.getTextContent()
+          const pageText = textContent.items
+            .map((item: any) => item.str)
+            .join(' ')
+          
+          // Check for financial keywords
+          for (const keyword of FINANCIAL_KEYWORDS) {
+            if (keyword.test(pageText)) {
+              const keywordName = keyword.source.replace(/[\\()]/g, '')
+              foundSections.add(keywordName)
+              console.log(`Found financial section: ${keywordName} on page ${pageNum}`)
+            }
+          }
+          
+          extractedText += `\n--- Page ${pageNum} ---\n${pageText}\n`
+          totalChars += pageText.length
+          
+          // Log progress every 3 pages
+          if (pageNum % 3 === 0) {
+            console.log(`Progress: ${pageNum}/${numPages} pages, ${totalChars} chars, ${foundSections.size} financial sections found`)
+          }
+          
+          // Early exit if all financial sections found
+          if (foundSections.size >= FINANCIAL_KEYWORDS.length * 0.8) {
+            console.log(`Found most financial sections by page ${pageNum}, stopping early`)
+            break
+          }
+        }
+        
+        // Apply final character limit
+        if (extractedText.length > MAX_CHARS) {
+          extractedText = extractedText.slice(0, MAX_CHARS) + '\n\n[Content truncated at 100k character limit]'
+        }
+        
+        const extractionTime = Date.now() - startTime
+        console.log('Extraction complete:', {
+          totalPages: pdfDoc.numPages,
+          pagesProcessed: Math.min(numPages, MAX_PAGES),
+          charactersExtracted: extractedText.length,
+          financialSectionsFound: Array.from(foundSections),
+          timeMs: extractionTime,
+          timePerPage: Math.round(extractionTime / numPages)
+        })
       } catch (pdfError) {
         console.error('PDF parsing error:', pdfError)
-        // Fallback to error handling
-        throw new Error('Failed to parse PDF content')
+        // Fallback to pdftotext if available
+        try {
+          console.log('Attempting fallback with pdftotext...')
+          const tempFile = await Deno.makeTempFile({ suffix: '.pdf' })
+          await Deno.writeFile(tempFile, uint8Array)
+          
+          const command = new Deno.Command('pdftotext', {
+            args: ['-f', '1', '-l', '10', '-layout', tempFile, '-'],
+            stdout: 'piped',
+            stderr: 'piped',
+          })
+          
+          const { stdout, stderr } = await command.output()
+          
+          if (stderr.length > 0) {
+            console.error('pdftotext error:', new TextDecoder().decode(stderr))
+          }
+          
+          extractedText = new TextDecoder().decode(stdout)
+          await Deno.remove(tempFile)
+          
+          // Apply character limit
+          if (extractedText.length > MAX_CHARS) {
+            extractedText = extractedText.slice(0, MAX_CHARS)
+          }
+        } catch (fallbackError) {
+          console.error('Fallback extraction failed:', fallbackError)
+          throw new Error('Failed to parse PDF content with both methods')
+        }
       }
       
       // Validate extracted text

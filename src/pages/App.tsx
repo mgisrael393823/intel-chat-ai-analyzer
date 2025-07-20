@@ -36,7 +36,7 @@ const App = () => {
     subscribeToDocumentChanges 
   } = useSupabase();
 
-  // Load user documents on mount
+  // Load user documents on mount and subscribe to changes
   useEffect(() => {
     const loadDocuments = async () => {
       const docs = await getUserDocuments();
@@ -55,7 +55,39 @@ const App = () => {
     };
     
     loadDocuments();
-  }, []);
+    
+    // Subscribe to document status changes for real-time updates
+    const unsubscribe = subscribeToDocumentChanges((updatedDoc) => {
+      console.log('📄 Document status update:', updatedDoc);
+      
+      setUploadedDocuments(prev => 
+        prev.map(doc => doc.id === updatedDoc.id ? updatedDoc : doc)
+      );
+      
+      // Add status message based on document status
+      if (updatedDoc.status === 'ready') {
+        const readyMessage: Message = {
+          id: `doc-ready-${updatedDoc.id}`,
+          content: `✅ "${updatedDoc.name}" has been processed successfully! I've extracted the text and I'm ready to answer your questions about this offering memorandum.`,
+          role: 'assistant',
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, readyMessage]);
+      } else if (updatedDoc.status === 'error') {
+        const errorMessage: Message = {
+          id: `doc-error-${updatedDoc.id}`,
+          content: `⚠️ I had trouble processing "${updatedDoc.name}". ${updatedDoc.error_message || 'Please try uploading again.'}`,
+          role: 'assistant',
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, errorMessage]);
+      }
+    });
+    
+    return () => {
+      unsubscribe();
+    };
+  }, [messages.length, subscribeToDocumentChanges, getUserDocuments]);
 
   const handleFileUpload = async (files: File[]) => {
     console.log('▶️ handleFileUpload called with files:', files.map(f => ({ name: f.name, size: f.size, type: f.type })));
@@ -72,7 +104,7 @@ const App = () => {
         // Add success message
         const successMessage: Message = {
           id: Date.now().toString(),
-          content: `Great! I've uploaded "${document.name}" and it's being processed. You can start asking me questions about this offering memorandum while I extract the text.`,
+          content: `📤 Uploading "${document.name}"... I'll process it in the background and let you know when it's ready. This usually takes 15-30 seconds.`,
           role: 'assistant',
           timestamp: new Date()
         };

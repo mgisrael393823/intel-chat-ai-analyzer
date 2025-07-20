@@ -199,27 +199,78 @@ export const useSupabase = () => {
     }
   };
 
-  const extractPdfText = async (documentId: string): Promise<boolean> => {
+  const extractPdfText = async (
+    documentId: string, 
+    onProgress?: (data: any) => void
+  ): Promise<boolean> => {
     try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      // Get session from localStorage to avoid hanging
+      const storageKey = `sb-${supabase.supabaseUrl.split('//')[1].split('.')[0]}-auth-token`;
+      const storedSession = localStorage.getItem(storageKey);
       
-      if (sessionError || !session) {
+      let token: string | undefined;
+      if (storedSession) {
+        try {
+          const parsed = JSON.parse(storedSession);
+          token = parsed?.access_token;
+        } catch (e) {
+          console.error('Failed to parse stored session:', e);
+        }
+      }
+      
+      if (!token) {
         throw new Error('Authentication required');
       }
 
-      const { data, error } = await supabase.functions.invoke('extract-pdf-text', {
-        body: { documentId },
+      // Use streaming endpoint for real-time progress
+      const url = `${supabase.supabaseUrl}/functions/v1/extract-pdf-stream`;
+      const response = await fetch(url, {
+        method: 'POST',
         headers: {
-          Authorization: `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ documentId }),
       });
 
-      if (error) {
-        console.error('Text extraction error:', error);
-        return false;
+      if (!response.ok) {
+        throw new Error(`Extraction failed: ${response.status}`);
       }
 
-      return data.success;
+      // Handle SSE stream
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              onProgress?.(data);
+              
+              if (data.type === 'complete' || data.type === 'error') {
+                return data.type === 'complete';
+              }
+            } catch (e) {
+              // Skip invalid JSON
+            }
+          } else if (line === 'event: done') {
+            return true;
+          }
+        }
+      }
+
+      return true;
     } catch (error) {
       console.error('Extract PDF text error:', error);
       return false;
