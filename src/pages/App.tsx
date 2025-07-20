@@ -58,6 +58,7 @@ const App = () => {
   }, []);
 
   const handleFileUpload = async (files: File[]) => {
+    console.log('▶️ handleFileUpload called with files:', files.map(f => ({ name: f.name, size: f.size, type: f.type })));
     if (files.length === 0) return;
     
     setIsUploading(true);

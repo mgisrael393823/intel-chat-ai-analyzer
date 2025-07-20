@@ -24,9 +24,40 @@ export interface Document {
 
 export const useSupabase = () => {
   const uploadFile = async (file: File): Promise<Document> => {
+    console.log('📁 uploadFile called with:', { name: file.name, size: file.size, type: file.type });
+    
     try {
-      // Get current user session
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      // Get current user session - try localStorage first due to getSession hanging
+      console.log('🔐 Getting session for upload...');
+      
+      let session: any = null;
+      let sessionError: any = null;
+      
+      // Try getting from localStorage first (same as sendMessage fix)
+      const storageKey = `sb-${supabase.supabaseUrl.split('//')[1].split('.')[0]}-auth-token`;
+      const storedSession = localStorage.getItem(storageKey);
+      
+      if (storedSession) {
+        try {
+          const parsed = JSON.parse(storedSession);
+          if (parsed?.access_token) {
+            session = { access_token: parsed.access_token, user: parsed.user };
+            console.log('✅ Got session from localStorage for upload');
+          }
+        } catch (e) {
+          console.error('Failed to parse stored session:', e);
+        }
+      }
+      
+      // Fallback to getSession if localStorage didn't work
+      if (!session) {
+        console.log('⚠️ No localStorage session, trying getSession...');
+        const result = await supabase.auth.getSession();
+        session = result.data.session;
+        sessionError = result.error;
+      }
+      
+      console.log('🔐 Session result:', { hasSession: !!session, sessionError });
       
       if (sessionError || !session) {
         throw new Error('Authentication required. Please sign in to upload files.');
@@ -35,14 +66,45 @@ export const useSupabase = () => {
       // Create FormData for file upload
       const formData = new FormData();
       formData.append('file', file);
+      console.log('📤 FormData created with file');
 
       // Call the upload-pdf edge function
-      const { data, error } = await supabase.functions.invoke('upload-pdf', {
-        body: formData,
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
+      const url = `${supabase.supabaseUrl}/functions/v1/upload-pdf`;
+      console.log('⏳ Starting upload to edge function:', url);
+      console.log('🔑 Using auth token:', session.access_token?.slice(0, 20) + '...');
+      
+      console.log('🚀 About to invoke upload-pdf function...');
+      
+      // Try direct fetch instead of supabase.functions.invoke
+      try {
+        console.log('📡 Using direct fetch to bypass SDK...');
+        const response = await fetch(url, {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+        });
+        
+        console.log('📡 Fetch response status:', response.status);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('❌ Upload fetch error:', errorText);
+          throw new Error(`Upload failed: ${response.status}`);
+        }
+        
+        const responseData = await response.json();
+        console.log('📡 Fetch response data:', responseData);
+        
+        var data = responseData;
+        var error = null;
+      } catch (fetchError) {
+        console.error('❌ Direct fetch failed:', fetchError);
+        throw fetchError;
+      }
+      
+      console.log('✅ upload-pdf response:', { data, error });
 
       if (error) {
         console.error('Upload error:', error);
