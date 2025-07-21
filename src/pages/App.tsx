@@ -87,7 +87,7 @@ const App = () => {
     return () => {
       unsubscribe();
     };
-  }, [messages.length, subscribeToDocumentChanges, getUserDocuments]);
+  }, []); // Remove dependencies that cause infinite loops
 
   const handleFileUpload = async (files: File[]) => {
     console.log('▶️ handleFileUpload called with files:', files.map(f => ({ name: f.name, size: f.size, type: f.type })));

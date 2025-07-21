@@ -67,7 +67,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             onKeyDown={handleKeyDown}
             placeholder={hasUploadedFiles ? "Ask questions about your documents..." : "Ask a question or upload a document..."}
             disabled={disabled || isStreaming}
-            className="resize-none pr-24 min-h-[44px] max-h-[120px] bg-background/50 border-border/50 focus:border-primary/50 transition-all duration-200"
+            className="resize-none pr-24 min-h-[44px] max-h-[120px] bg-background/50 border-border/50 focus:border-primary/50 transition-colors duration-100"
             maxLength={maxLength}
             autoComplete="off"
           />
@@ -95,7 +95,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 type="submit"
                 size="sm"
                 disabled={!message.trim() || disabled || isStreaming}
-                className="h-8 w-8 p-0 transition-all duration-200 hover:scale-105"
+                className="h-8 w-8 p-0"
               >
                 <Send className="h-4 w-4" />
               </Button>

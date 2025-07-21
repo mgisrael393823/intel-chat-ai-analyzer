@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import debounce from 'lodash.debounce';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ChatMessage, Message } from './ChatMessage';
 import { Separator } from '@/components/ui/separator';
@@ -8,7 +9,7 @@ interface ChatMessagesProps {
   isStreaming: boolean;
 }
 
-export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, isStreaming }) => {
+export const ChatMessages: React.FC<ChatMessagesProps> = React.memo(({ messages, isStreaming }) => {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [showNewMessageDivider, setShowNewMessageDivider] = useState(false);
   const [lastScrollTop, setLastScrollTop] = useState(0);
@@ -32,15 +33,19 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, isStreamin
         }
       }
     }
-  }, [messages, lastScrollTop]);
+  }, [messages]); // Remove lastScrollTop to prevent loops
 
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const scrollTop = e.target.scrollTop;
-    setLastScrollTop(scrollTop);
-    
-    const isAtBottom = scrollTop >= e.target.scrollHeight - e.target.clientHeight - 10;
-    setShowNewMessageDivider(!isAtBottom && messages.length > 0);
-  };
+  const handleScroll = useMemo(
+    () => debounce((e: React.UIEvent<HTMLDivElement>) => {
+      const target = e.target as HTMLDivElement;
+      const scrollTop = target.scrollTop;
+      setLastScrollTop(scrollTop);
+      
+      const isAtBottom = scrollTop >= target.scrollHeight - target.clientHeight - 10;
+      setShowNewMessageDivider(!isAtBottom && messages.length > 0);
+    }, 100),
+    [messages.length]
+  );
 
   const scrollToBottom = () => {
     if (scrollAreaRef.current) {
@@ -119,4 +124,4 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, isStreamin
       </ScrollArea>
     </div>
   );
-};
+});

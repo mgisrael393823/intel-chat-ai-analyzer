@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { User, Bot } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export interface Message {
   id: string;
@@ -15,14 +16,15 @@ interface ChatMessageProps {
   isLatest?: boolean;
 }
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isLatest }) => {
+export const ChatMessage: React.FC<ChatMessageProps> = memo(({ message, isLatest }) => {
   const isUser = message.role === 'user';
 
   return (
     <div 
-      className={`flex gap-3 mb-6 animate-fade-in ${
+      className={cn(
+        'flex gap-3 mb-6 animate-fade-in',
         isUser ? 'flex-row-reverse' : 'flex-row'
-      }`}
+      )}
     >
       <Avatar className="h-8 w-8 border-2 border-border/50">
         <AvatarFallback className={isUser ? 'bg-primary text-primary-foreground' : 'bg-muted'}>
@@ -30,13 +32,17 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isLatest }) =
         </AvatarFallback>
       </Avatar>
       
-      <div className={`flex flex-col max-w-[80%] ${isUser ? 'items-end' : 'items-start'}`}>
+      <div className={cn(
+        'flex flex-col max-w-[80%]',
+        isUser ? 'items-end' : 'items-start'
+      )}>
         <div
-          className={`rounded-lg px-4 py-3 shadow-sm border transition-all duration-200 ${
+          className={cn(
+            'rounded-lg px-4 py-3 shadow-sm border',
             isUser
               ? 'bg-primary text-primary-foreground border-primary/20'
               : 'bg-card border-border/50 backdrop-blur-sm'
-          }`}
+          )}
         >
           <p className="text-sm leading-relaxed whitespace-pre-wrap">
             {message.content}
@@ -59,4 +65,4 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, isLatest }) =
       </div>
     </div>
   );
-};
+});

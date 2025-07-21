@@ -1,8 +1,9 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, memo } from 'react';
 import { Upload, File, X, BarChart3, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useSupabase } from '@/hooks/useSupabase';
+import { cn } from '@/lib/utils';
 
 interface UploadedFile {
   id: string;
@@ -21,7 +22,7 @@ interface FileUploadZoneProps {
   uploadProgress: number;
 }
 
-export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
+export const FileUploadZone: React.FC<FileUploadZoneProps> = memo(({
   onFileUpload,
   uploadedFiles,
   isUploading,
@@ -101,14 +102,15 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
   return (
     <div className="space-y-4">
       {/* Upload Zone */}
-      <Card className="border-dashed border-2 transition-all duration-200 hover:shadow-md bg-card/50 backdrop-blur-sm">
+      <Card className="border-dashed border-2 bg-card/50 backdrop-blur-sm">
         <CardContent className="p-6">
           <div
-            className={`relative border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${
+            className={cn(
+              'relative border-2 border-dashed rounded-lg p-8 text-center transition-colors duration-100',
               isDragOver
                 ? 'border-primary bg-primary/5 scale-[1.02]'
                 : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/20'
-            }`}
+            )}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
@@ -125,9 +127,10 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
               aria-label="Upload PDF files"
             />
             
-            <Upload className={`mx-auto h-12 w-12 mb-4 transition-colors duration-200 ${
+            <Upload className={cn(
+              'mx-auto h-12 w-12 mb-4 transition-colors duration-200',
               isDragOver ? 'text-primary' : 'text-muted-foreground'
-            }`} />
+            )} />
             
             <h3 className="text-lg font-semibold text-foreground mb-2">
               Drop your PDF here
@@ -189,12 +192,13 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
                           {formatFileSize(file.size)}
                         </p>
                         {file.status && (
-                          <span className={`text-xs ${
+                          <span className={cn(
+                            'text-xs',
                             file.status === 'processing' ? 'text-blue-500' :
                             file.status === 'ready' ? 'text-green-500' :
                             file.status === 'error' ? 'text-red-500' :
                             'text-muted-foreground'
-                          }`}>
+                          )}>
                             • {file.status === 'processing' ? 'Processing...' :
                                file.status === 'ready' ? 'Ready' :
                                file.status === 'error' ? 'Error' :
@@ -258,4 +262,4 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
       )}
     </div>
   );
-};
+});
