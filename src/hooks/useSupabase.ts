@@ -1,5 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
-import { useAuthSession } from './useAuthSession';
+import authService from '@/services/AuthService';
 
 export interface UploadedFile {
   id: string;
@@ -26,29 +26,15 @@ export interface Document {
 export const useSupabase = () => {
   const uploadFile = async (file: File): Promise<Document> => {
     console.log('📁 uploadFile called with:', { name: file.name, size: file.size, type: file.type });
-    
+
     try {
-      // Get auth token from localStorage to avoid hanging
-      const storageKey = `sb-${supabase.supabaseUrl.split('//')[1].split('.')[0]}-auth-token`;
-      const storedSession = localStorage.getItem(storageKey);
-      
-      let userId: string | undefined;
-      let userEmail: string | undefined;
-      
-      if (storedSession) {
-        try {
-          const parsed = JSON.parse(storedSession);
-          const user = parsed?.user;
-          userId = user?.id;
-          userEmail = user?.email;
-        } catch (e) {
-          console.error('Failed to parse stored session:', e);
-        }
-      }
-      
-      if (!userId) {
+      const session = await authService.getSessionWithTimeout();
+      if (!session) {
         throw new Error('Authentication required. Please sign in to upload files.');
       }
+
+      const userId = session.user.id;
+      const userEmail = session.user.email;
       
       console.log('👤 Uploading as user:', userEmail);
       
@@ -218,18 +204,14 @@ export const useSupabase = () => {
   };
 
   const extractPdfText = async (
-    documentId: string, 
-    onProgress?: (data: any) => void
+    documentId: string,
+    onProgress?: (data: unknown) => void
   ): Promise<boolean> => {
     try {
-      // Get session properly without hanging
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError || !session) {
-        console.error('Session error:', sessionError);
+      const session = await authService.getSessionWithTimeout();
+      if (!session) {
         throw new Error('Authentication required');
       }
-      
       const token = session.access_token;
 
       // Call the extract-pdf-text function directly
@@ -290,174 +272,87 @@ export const useSupabase = () => {
     };
   };
 
-  /**
-   * Fetch helper for streaming chat completions from the Supabase edge function.
-   * Adds required headers and handles Server-Sent Events (SSE) parsing.
-   */
-  const fetchChatStream = async (
-    openaiKey: string,
-    messages: { role: string; content: string }[],
-    model: string,
-    temperature: number,
-    onChunk: (chunk: string) => void
-  ): Promise<void> => {
-    const response = await fetch('/functions/v1/chat-stream', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${openaiKey}`,
-      },
-      body: JSON.stringify({ messages, model, temperature }),
-    });
-
-    if (!response.ok) {
-      console.error(await response.text());
-      throw new Error(`Request failed with status ${response.status}`);
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error('No response body');
-    }
-
-    const decoder = new TextDecoder();
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') return;
-          try {
-            const parsed = JSON.parse(data);
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content) onChunk(content);
-          } catch {
-            /* ignore malformed JSON */
-          }
-        }
-      }
-    }
-  };
 
   const sendMessage = async (
-    message: string, 
-    threadId?: string, 
+    message: string,
+    threadId?: string,
     documentId?: string,
     onChunk?: (content: string) => void,
     onComplete?: (threadId: string, messageId: string) => void,
     onError?: (error: string) => void
   ): Promise<void> => {
-    console.log('🛠️ sendMessage called with:', { message, threadId, documentId });
-    console.log('🚨 DEBUGGING: sendMessage function started - timestamp:', Date.now());
-    
     try {
-      console.log('🔍 [SEND MESSAGE ENTRY] - inside try block');
-      
-      // Try getting the session from localStorage directly to avoid hanging
-      console.log('… attempting to get session from localStorage');
-      const storageKey = `sb-${supabase.supabaseUrl.split('//')[1].split('.')[0]}-auth-token`;
-      console.log('Storage key:', storageKey);
-      
-      const storedSession = localStorage.getItem(storageKey);
-      console.log('Stored session exists:', !!storedSession);
-      
-      let token: string | undefined;
-      
-      if (storedSession) {
-        try {
-          const parsed = JSON.parse(storedSession);
-          token = parsed?.access_token;
-          console.log('✅ Got token from localStorage:', token?.slice(0,20) + '...');
-        } catch (e) {
-          console.error('Failed to parse stored session:', e);
-        }
-      }
-      
-      if (!token) {
-        console.log('⚠️ No token found, authentication required');
+      const session = await authService.getSessionWithTimeout();
+      if (!session) {
         onError?.('Please sign in to send messages');
         return;
       }
-      
-      console.log('✅ Proceeding to fetch with token');
 
-      // Make direct fetch call for streaming support
-      const url = `${supabase.supabaseUrl}/functions/v1/chat-stream`;
-      console.log('Sending message to:', url);
-      console.log('Request body:', { message, threadId, documentId });
-      
-      console.log('→ about to fetch /chat-stream');
-      const response = await fetch(url, {
+      const response = await fetch(`${supabase.supabaseUrl}/functions/v1/chat-stream`, {
         method: 'POST',
+        cache: 'no-cache',
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ message, threadId, documentId }),
+        body: JSON.stringify({ message, threadId, documentId })
       });
 
-      console.log('← fetch returned', response.status);
-      console.log('Response headers:', response.headers);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Error response:', errorText);
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      if (!response.body) {
-        throw new Error('No response body');
+      if (!response.ok || !response.body) {
+        onError?.(`HTTP ${response.status}`);
+        return;
       }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-
+      let buf = '';
       let currentThreadId = threadId;
       let currentMessageId: string | undefined;
 
       while (true) {
-        const { done, value } = await reader.read();
+        const { value, done } = await reader.read();
         if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            
-            try {
-              const parsed = JSON.parse(data);
-              
-              switch (parsed.type) {
-                case 'thread':
-                  currentThreadId = parsed.threadId;
-                  currentMessageId = parsed.messageId;
-                  break;
-                case 'content':
-                  onChunk?.(parsed.content);
-                  break;
-                case 'done':
-                  if (currentThreadId && currentMessageId) {
-                    onComplete?.(currentThreadId, currentMessageId);
-                  }
-                  return;
-                case 'error':
-                  onError?.(parsed.error);
-                  return;
-              }
-            } catch (e) {
-              // Skip invalid JSON
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop() ?? '';
+        for (const part of parts) {
+          if (!part.startsWith('data: ')) continue;
+          const dataStr = part.slice(6).trim();
+          if (!dataStr) continue;
+          if (dataStr === '[DONE]') {
+            if (currentThreadId && currentMessageId) {
+              onComplete?.(currentThreadId, currentMessageId);
             }
+            return;
+          }
+          try {
+            const parsed = JSON.parse(dataStr);
+            switch (parsed.type) {
+              case 'thread':
+                currentThreadId = parsed.threadId;
+                currentMessageId = parsed.messageId;
+                break;
+              case 'content':
+                onChunk?.(parsed.content);
+                break;
+              case 'done':
+                if (currentThreadId && currentMessageId) {
+                  onComplete?.(currentThreadId, currentMessageId);
+                }
+                return;
+              case 'error':
+                onError?.(parsed.error);
+                return;
+              default:
+                break;
+            }
+          } catch {
+            /* ignore */
           }
         }
       }
     } catch (error) {
       console.error('💥 sendMessage unexpected error:', error);
-      console.error('💥 Error stack:', error instanceof Error ? error.stack : 'No stack');
-      console.error('💥 Error type:', typeof error, error);
       onError?.(error instanceof Error ? error.message : 'Failed to send message');
     }
   };
@@ -507,9 +402,8 @@ export const useSupabase = () => {
 
   const generateSnapshot = async (documentId: string) => {
     try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError || !session) {
+      const session = await authService.getSessionWithTimeout();
+      if (!session) {
         throw new Error('Authentication required');
       }
 
@@ -539,7 +433,6 @@ export const useSupabase = () => {
     deleteDocument, 
     extractPdfText,
     subscribeToDocumentChanges,
-    fetchChatStream,
     sendMessage,
     getThreadMessages,
     getUserThreads,

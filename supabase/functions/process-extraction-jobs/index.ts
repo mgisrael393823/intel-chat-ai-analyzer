@@ -41,7 +41,7 @@ serve(async (req) => {
     const results = []
     
     // Process jobs in parallel with concurrency limit
-    const processJob = async (job: any) => {
+    const processJob = async (job: { id: string }) => {
       try {
         // Mark job as processing
         await supabaseClient

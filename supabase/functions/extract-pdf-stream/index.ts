@@ -129,7 +129,7 @@ serve(async (req) => {
             const page = await pdfDoc.getPage(pageNum)
             const textContent = await page.getTextContent()
             const pageText = textContent.items
-              .map((item: any) => item.str)
+              .map((item: unknown) => (item as { str: string }).str)
               .join(' ')
 
             // Check for financial keywords

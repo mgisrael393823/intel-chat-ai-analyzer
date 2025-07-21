@@ -62,7 +62,7 @@ async function benchmarkPdfjs(pdfBuffer: ArrayBuffer): Promise<BenchmarkResult> 
       const page = await pdfDoc.getPage(i)
       const textContent = await page.getTextContent()
       const pageText = textContent.items
-        .map((item: any) => item.str)
+        .map((item: unknown) => (item as { str: string }).str)
         .join(' ')
       extractedText += pageText + '\n'
     }
