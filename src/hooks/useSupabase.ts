@@ -28,29 +28,16 @@ export const useSupabase = () => {
     console.log('📁 uploadFile called with:', { name: file.name, size: file.size, type: file.type });
     
     try {
-      // Get auth token from localStorage to avoid hanging
-      const storageKey = `sb-${supabase.supabaseUrl.split('//')[1].split('.')[0]}-auth-token`;
-      const storedSession = localStorage.getItem(storageKey);
-      
-      let userId: string | undefined;
-      let userEmail: string | undefined;
-      
-      if (storedSession) {
-        try {
-          const parsed = JSON.parse(storedSession);
-          const user = parsed?.user;
-          userId = user?.id;
-          userEmail = user?.email;
-        } catch (e) {
-          console.error('Failed to parse stored session:', e);
-        }
+      const { data: { user } } = await supabase.auth.getUser()
+
+      if (!user) {
+        throw new Error('Authentication required. Please sign in to upload files.')
       }
-      
-      if (!userId) {
-        throw new Error('Authentication required. Please sign in to upload files.');
-      }
-      
-      console.log('👤 Uploading as user:', userEmail);
+
+      const userId = user.id
+      const userEmail = user.email
+
+      console.log('👤 Uploading as user:', userEmail)
       
       // Generate unique filename with user ID prefix for organization
       const fileExt = file.name.split('.').pop() || 'pdf';
@@ -355,33 +342,16 @@ export const useSupabase = () => {
     
     try {
       console.log('🔍 [SEND MESSAGE ENTRY] - inside try block');
-      
-      // Try getting the session from localStorage directly to avoid hanging
-      console.log('… attempting to get session from localStorage');
-      const storageKey = `sb-${supabase.supabaseUrl.split('//')[1].split('.')[0]}-auth-token`;
-      console.log('Storage key:', storageKey);
-      
-      const storedSession = localStorage.getItem(storageKey);
-      console.log('Stored session exists:', !!storedSession);
-      
-      let token: string | undefined;
-      
-      if (storedSession) {
-        try {
-          const parsed = JSON.parse(storedSession);
-          token = parsed?.access_token;
-          console.log('✅ Got token from localStorage:', token?.slice(0,20) + '...');
-        } catch (e) {
-          console.error('Failed to parse stored session:', e);
-        }
+
+      const { data: { session } } = await supabase.auth.getSession()
+
+      if (!session) {
+        onError?.('Please sign in to send messages')
+        return
       }
-      
-      if (!token) {
-        console.log('⚠️ No token found, authentication required');
-        onError?.('Please sign in to send messages');
-        return;
-      }
-      
+
+      const token = session.access_token
+
       console.log('✅ Proceeding to fetch with token');
 
       // Make direct fetch call for streaming support

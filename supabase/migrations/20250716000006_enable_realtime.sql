@@ -6,6 +6,8 @@ alter publication supabase_realtime add table public.messages;
 
 -- Enable realtime for threads table
 alter publication supabase_realtime add table public.threads;
+-- Enable realtime for extraction_jobs table
+alter publication supabase_realtime add table public.extraction_jobs;
 
 -- Create function to notify document status changes
 create or replace function notify_document_status_change()
