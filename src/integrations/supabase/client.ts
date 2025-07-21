@@ -13,5 +13,19 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     storage: localStorage,
     persistSession: true,
     autoRefreshToken: true,
+    detectSessionInUrl: true,
+    flowType: 'pkce',
+    storageKey: `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`,
+    debug: false
+  },
+  global: {
+    headers: {
+      'x-client-info': 'om-intel-chat@1.0.0'
+    }
+  },
+  realtime: {
+    params: {
+      eventsPerSecond: 10
+    }
   }
 });

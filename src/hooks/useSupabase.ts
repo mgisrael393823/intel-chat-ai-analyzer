@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { useAuthSession } from './useAuthSession';
 
 export interface UploadedFile {
   id: string;
@@ -27,18 +28,33 @@ export const useSupabase = () => {
     console.log('📁 uploadFile called with:', { name: file.name, size: file.size, type: file.type });
     
     try {
-      // Get current user to ensure we're authenticated
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      // Get auth token from localStorage to avoid hanging
+      const storageKey = `sb-${supabase.supabaseUrl.split('//')[1].split('.')[0]}-auth-token`;
+      const storedSession = localStorage.getItem(storageKey);
       
-      if (userError || !user) {
+      let userId: string | undefined;
+      let userEmail: string | undefined;
+      
+      if (storedSession) {
+        try {
+          const parsed = JSON.parse(storedSession);
+          const user = parsed?.user;
+          userId = user?.id;
+          userEmail = user?.email;
+        } catch (e) {
+          console.error('Failed to parse stored session:', e);
+        }
+      }
+      
+      if (!userId) {
         throw new Error('Authentication required. Please sign in to upload files.');
       }
       
-      console.log('👤 Uploading as user:', user.email);
+      console.log('👤 Uploading as user:', userEmail);
       
       // Generate unique filename with user ID prefix for organization
       const fileExt = file.name.split('.').pop() || 'pdf';
-      const fileName = `${user.id}/${crypto.randomUUID()}.${fileExt}`;
+      const fileName = `${userId}/${crypto.randomUUID()}.${fileExt}`;
       
       console.log('⏳ Starting direct upload to Supabase Storage...');
       console.log('📦 Bucket: documents, Path:', fileName);
@@ -72,7 +88,7 @@ export const useSupabase = () => {
       
       // Create document record in database
       const documentRecord = {
-        user_id: user.id,
+        user_id: userId,
         name: file.name,
         size: file.size,
         type: file.type,
@@ -206,23 +222,15 @@ export const useSupabase = () => {
     onProgress?: (data: any) => void
   ): Promise<boolean> => {
     try {
-      // Get session from localStorage to avoid hanging
-      const storageKey = `sb-${supabase.supabaseUrl.split('//')[1].split('.')[0]}-auth-token`;
-      const storedSession = localStorage.getItem(storageKey);
+      // Get session properly without hanging
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      let token: string | undefined;
-      if (storedSession) {
-        try {
-          const parsed = JSON.parse(storedSession);
-          token = parsed?.access_token;
-        } catch (e) {
-          console.error('Failed to parse stored session:', e);
-        }
-      }
-      
-      if (!token) {
+      if (sessionError || !session) {
+        console.error('Session error:', sessionError);
         throw new Error('Authentication required');
       }
+      
+      const token = session.access_token;
 
       // Call the extract-pdf-text function directly
       const url = `${supabase.supabaseUrl}/functions/v1/extract-pdf-text`;
@@ -348,7 +356,7 @@ export const useSupabase = () => {
     try {
       console.log('🔍 [SEND MESSAGE ENTRY] - inside try block');
       
-      // Try getting the session from localStorage directly
+      // Try getting the session from localStorage directly to avoid hanging
       console.log('… attempting to get session from localStorage');
       const storageKey = `sb-${supabase.supabaseUrl.split('//')[1].split('.')[0]}-auth-token`;
       console.log('Storage key:', storageKey);
@@ -369,14 +377,15 @@ export const useSupabase = () => {
       }
       
       if (!token) {
-        console.log('⚠️ No token in localStorage, falling back to anon key');
-        token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wc3FsYXVtaHp6bHFqdHljcGltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI3MDAzMzAsImV4cCI6MjA2ODI3NjMzMH0.i_dRSQj_l5bpzHjKMeq58QjWwoa8Y2QikeZrav8-rxo";
+        console.log('⚠️ No token found, authentication required');
+        onError?.('Please sign in to send messages');
+        return;
       }
       
       console.log('✅ Proceeding to fetch with token');
 
       // Make direct fetch call for streaming support
-      const url = `https://npsqlaumhzzlqjtycpim.supabase.co/functions/v1/chat-stream`;
+      const url = `${supabase.supabaseUrl}/functions/v1/chat-stream`;
       console.log('Sending message to:', url);
       console.log('Request body:', { message, threadId, documentId });
       
