@@ -104,7 +104,7 @@ const App = () => {
         // Add success message
         const successMessage: Message = {
           id: Date.now().toString(),
-          content: `📤 Uploading "${document.name}"... I'll process it in the background and let you know when it's ready. This usually takes 15-30 seconds.`,
+          content: `✅ Upload complete for "${document.name}"! I'm now processing the PDF to extract text. This usually takes 15-30 seconds. You'll see the status update in the file list.`,
           role: 'assistant',
           timestamp: new Date()
         };
@@ -252,6 +252,8 @@ const App = () => {
                 name: doc.name,
                 size: doc.size,
                 type: doc.type,
+                status: doc.status,
+                error_message: doc.error_message,
               }))}
               isUploading={isUploading}
               uploadProgress={uploadProgress}

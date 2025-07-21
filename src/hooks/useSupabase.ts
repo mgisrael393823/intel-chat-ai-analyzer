@@ -27,97 +27,99 @@ export const useSupabase = () => {
     console.log('📁 uploadFile called with:', { name: file.name, size: file.size, type: file.type });
     
     try {
-      // Get current user session - try localStorage first due to getSession hanging
-      console.log('🔐 Getting session for upload...');
+      // Get current user to ensure we're authenticated
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
       
-      let session: any = null;
-      let sessionError: any = null;
-      
-      // Try getting from localStorage first (same as sendMessage fix)
-      const storageKey = `sb-${supabase.supabaseUrl.split('//')[1].split('.')[0]}-auth-token`;
-      const storedSession = localStorage.getItem(storageKey);
-      
-      if (storedSession) {
-        try {
-          const parsed = JSON.parse(storedSession);
-          if (parsed?.access_token) {
-            session = { access_token: parsed.access_token, user: parsed.user };
-            console.log('✅ Got session from localStorage for upload');
-          }
-        } catch (e) {
-          console.error('Failed to parse stored session:', e);
-        }
-      }
-      
-      // Fallback to getSession if localStorage didn't work
-      if (!session) {
-        console.log('⚠️ No localStorage session, trying getSession...');
-        const result = await supabase.auth.getSession();
-        session = result.data.session;
-        sessionError = result.error;
-      }
-      
-      console.log('🔐 Session result:', { hasSession: !!session, sessionError });
-      
-      if (sessionError || !session) {
+      if (userError || !user) {
         throw new Error('Authentication required. Please sign in to upload files.');
       }
-
-      // Create FormData for file upload
-      const formData = new FormData();
-      formData.append('file', file);
-      console.log('📤 FormData created with file');
-
-      // Call the upload-pdf edge function
-      const url = `${supabase.supabaseUrl}/functions/v1/upload-pdf`;
-      console.log('⏳ Starting upload to edge function:', url);
-      console.log('🔑 Using auth token:', session.access_token?.slice(0, 20) + '...');
       
-      console.log('🚀 About to invoke upload-pdf function...');
+      console.log('👤 Uploading as user:', user.email);
       
-      // Try direct fetch instead of supabase.functions.invoke
-      try {
-        console.log('📡 Using direct fetch to bypass SDK...');
-        const response = await fetch(url, {
-          method: 'POST',
-          body: formData,
-          headers: {
-            'Authorization': `Bearer ${session.access_token}`,
-          },
+      // Generate unique filename with user ID prefix for organization
+      const fileExt = file.name.split('.').pop() || 'pdf';
+      const fileName = `${user.id}/${crypto.randomUUID()}.${fileExt}`;
+      
+      console.log('⏳ Starting direct upload to Supabase Storage...');
+      console.log('📦 Bucket: documents, Path:', fileName);
+      
+      // Direct upload to Supabase Storage
+      const { data: uploadData, error: uploadError } = await supabase
+        .storage
+        .from('documents')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: false // Prevent overwriting existing files
         });
-        
-        console.log('📡 Fetch response status:', response.status);
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('❌ Upload fetch error:', errorText);
-          throw new Error(`Upload failed: ${response.status}`);
-        }
-        
-        const responseData = await response.json();
-        console.log('📡 Fetch response data:', responseData);
-        
-        var data = responseData;
-        var error = null;
-      } catch (fetchError) {
-        console.error('❌ Direct fetch failed:', fetchError);
-        throw fetchError;
+      
+      console.log('✅ Direct upload response:', { data: uploadData, error: uploadError });
+      
+      if (uploadError) {
+        console.error('❌ Storage upload error:', uploadError);
+        throw uploadError;
       }
       
-      console.log('✅ upload-pdf response:', { data, error });
-
-      if (error) {
-        console.error('Upload error:', error);
-        throw new Error(error.message || 'Failed to upload file');
+      if (!uploadData?.path) {
+        throw new Error('Upload succeeded but no file path returned');
       }
-
-      if (!data.success) {
-        throw new Error(data.error || 'Upload failed');
+      
+      // Get the public URL for the uploaded file
+      const { data: urlData } = supabase.storage
+        .from('documents')
+        .getPublicUrl(uploadData.path);
+      
+      console.log('🔗 Public URL generated:', urlData.publicUrl);
+      
+      // Create document record in database
+      const documentRecord = {
+        user_id: user.id,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        storage_url: urlData.publicUrl,
+        status: 'processing',
+        upload_progress: 100
+      };
+      
+      console.log('💾 Creating document record:', documentRecord);
+      
+      const { data: documentData, error: dbError } = await supabase
+        .from('documents')
+        .insert(documentRecord)
+        .select()
+        .single();
+      
+      if (dbError) {
+        console.error('❌ Database error:', dbError);
+        // Try to clean up the uploaded file
+        await supabase.storage.from('documents').remove([uploadData.path]);
+        throw new Error('Failed to save document record: ' + dbError.message);
       }
-
-      return data.document;
+      
+      console.log('✅ Document record created:', documentData);
+      
+      // Trigger PDF text extraction asynchronously
+      // Note: This is fire-and-forget, we don't await it
+      extractPdfText(documentData.id).then(success => {
+        console.log('📄 PDF extraction completed:', success);
+      }).catch(error => {
+        console.error('📄 PDF extraction failed:', error);
+        // Update document status to error
+        supabase
+          .from('documents')
+          .update({ 
+            status: 'error',
+            error_message: 'Failed to extract text from PDF'
+          })
+          .eq('id', documentData.id)
+          .then(() => console.log('Updated document status to error'))
+          .catch(err => console.error('Failed to update document status:', err));
+      });
+      
+      // Return the document immediately (extraction happens in background)
+      return documentData as Document;
     } catch (error) {
-      console.error('Upload file error:', error);
+      console.error('❌ Upload file error:', error);
       throw error;
     }
   };
@@ -222,8 +224,8 @@ export const useSupabase = () => {
         throw new Error('Authentication required');
       }
 
-      // Use streaming endpoint for real-time progress
-      const url = `${supabase.supabaseUrl}/functions/v1/extract-pdf-stream`;
+      // Call the extract-pdf-text function directly
+      const url = `${supabase.supabaseUrl}/functions/v1/extract-pdf-text`;
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -237,40 +239,24 @@ export const useSupabase = () => {
         throw new Error(`Extraction failed: ${response.status}`);
       }
 
-      // Handle SSE stream
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (!reader) {
-        throw new Error('No response body');
+      // Parse the response
+      const result = await response.json();
+      
+      if (result.error) {
+        throw new Error(result.error);
       }
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              onProgress?.(data);
-              
-              if (data.type === 'complete' || data.type === 'error') {
-                return data.type === 'complete';
-              }
-            } catch (e) {
-              // Skip invalid JSON
-            }
-          } else if (line === 'event: done') {
-            return true;
-          }
-        }
+      // Notify progress callback with completion
+      if (onProgress) {
+        onProgress({
+          type: 'complete',
+          message: result.message,
+          textLength: result.textLength,
+          chunks: result.chunks
+        });
       }
 
-      return true;
+      return result.success;
     } catch (error) {
       console.error('Extract PDF text error:', error);
       return false;

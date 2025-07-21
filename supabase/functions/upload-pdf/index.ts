@@ -175,35 +175,36 @@ serve(async (req) => {
         document_id: documentData.id,
       })
 
-    // Queue PDF extraction job using a lightweight queue pattern
-    console.log('Queueing PDF extraction job for document:', documentData.id)
+    // Trigger PDF text extraction asynchronously but don't await
+    console.log('Triggering PDF extraction for document:', documentData.id)
     
-    // Create extraction job record for processing
-    const { error: jobError } = await supabaseClient
-      .from('extraction_jobs')
-      .insert({
-        document_id: documentData.id,
-        status: 'pending',
-        priority: file.size < 2 * 1024 * 1024 ? 'high' : 'normal', // Prioritize smaller files
-        created_at: new Date().toISOString()
-      })
+    // Create a promise for the extraction but don't await it
+    const extractionPromise = supabaseClient.functions.invoke('extract-pdf-text', {
+      body: { documentId: documentData.id },
+      headers: {
+        Authorization: req.headers.get('Authorization')!,
+      }
+    }).then((result) => {
+      console.log('PDF extraction completed for:', documentData.id, result)
+    }).catch(async (error) => {
+      console.error('PDF extraction failed:', error)
+      // Update document status to error
+      try {
+        await supabaseClient
+          .from('documents')
+          .update({ 
+            status: 'error',
+            error_message: error.message || 'Failed to extract text from PDF'
+          })
+          .eq('id', documentData.id)
+      } catch (updateError) {
+        console.error('Failed to update document status:', updateError)
+      }
+    })
     
-    if (jobError) {
-      console.error('Failed to queue extraction job:', jobError)
-      // Fallback to direct invocation
-      setTimeout(() => {
-        supabaseClient.functions.invoke('extract-pdf-text', {
-          body: { documentId: documentData.id },
-          headers: {
-            Authorization: req.headers.get('Authorization')!,
-          }
-        }).catch(error => {
-          console.error('Background extraction failed:', error)
-        })
-      }, 100) // Small delay to ensure response is sent first
-    }
-
-    // Return immediately - don't wait for extraction
+    // Don't wait for extraction to complete
+    
+    // Return immediately
     return new Response(
       JSON.stringify({
         success: true,

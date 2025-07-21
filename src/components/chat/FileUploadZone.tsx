@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Upload, File, X, BarChart3 } from 'lucide-react';
+import { Upload, File, X, BarChart3, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useSupabase } from '@/hooks/useSupabase';
@@ -10,6 +10,8 @@ interface UploadedFile {
   size: number;
   type: string;
   preview?: string;
+  status?: 'uploading' | 'processing' | 'ready' | 'error';
+  error_message?: string;
 }
 
 interface FileUploadZoneProps {
@@ -163,14 +165,43 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
                   className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-border/50 hover:bg-muted/50 transition-colors group"
                 >
                   <div className="flex items-center space-x-3">
-                    <File className="h-5 w-5 text-primary" />
+                    <div className="relative">
+                      <File className="h-5 w-5 text-primary" />
+                      {file.status === 'processing' && (
+                        <Loader2 className="h-3 w-3 absolute -bottom-1 -right-1 text-blue-500 animate-spin" />
+                      )}
+                      {file.status === 'ready' && (
+                        <CheckCircle className="h-3 w-3 absolute -bottom-1 -right-1 text-green-500" />
+                      )}
+                      {file.status === 'error' && (
+                        <AlertCircle className="h-3 w-3 absolute -bottom-1 -right-1 text-red-500" />
+                      )}
+                    </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-foreground truncate">
                         {file.name}
                       </p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatFileSize(file.size)}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs text-muted-foreground">
+                          {formatFileSize(file.size)}
+                        </p>
+                        {file.status && (
+                          <span className={`text-xs ${
+                            file.status === 'processing' ? 'text-blue-500' :
+                            file.status === 'ready' ? 'text-green-500' :
+                            file.status === 'error' ? 'text-red-500' :
+                            'text-muted-foreground'
+                          }`}>
+                            • {file.status === 'processing' ? 'Processing...' :
+                               file.status === 'ready' ? 'Ready' :
+                               file.status === 'error' ? 'Error' :
+                               'Uploading...'}
+                          </span>
+                        )}
+                      </div>
+                      {file.status === 'error' && file.error_message && (
+                        <p className="text-xs text-red-500 mt-1">{file.error_message}</p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">

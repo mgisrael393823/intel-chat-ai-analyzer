@@ -18,28 +18,25 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [showAuthModal, setShowAuthModal] = useState(false);
   
-  console.log('ProtectedRoute render:', { user, isLoading, showAuthModal });
+  console.log('ProtectedRoute render:', { user: !!user, isLoading, showAuthModal });
 
   useEffect(() => {
     let mounted = true;
     
-    // Simple session check with quick timeout
+    // Check current session
     const checkSession = async () => {
-      console.log('ProtectedRoute: Quick session check...');
-      
       try {
-        const { data: { session }, error } = await supabase.auth.getSession();
+        const { data: { session } } = await supabase.auth.getSession();
         
         if (!mounted) return;
         
-        if (error) {
-          console.error('Session error:', error);
-          setUser(null);
+        if (session?.user) {
+          setUser(session.user);
+          setShowAuthModal(false);
+          await createUserProfileIfNeeded(session.user);
         } else {
-          setUser(session?.user ?? null);
-          if (!session?.user) {
-            setShowAuthModal(true);
-          }
+          setUser(null);
+          setShowAuthModal(true);
         }
       } catch (err) {
         console.error('Session check failed:', err);
@@ -57,42 +54,30 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('ProtectedRoute: Auth state change:', { event, userEmail: session?.user?.email });
+        console.log('Auth state change:', { event, userEmail: session?.user?.email });
         
         if (!mounted) return;
         
-        setUser(session?.user ?? null);
-        setIsLoading(false);
-
-        if (event === 'SIGNED_IN') {
-          console.log('ProtectedRoute: User signed in');
+        if (session?.user) {
+          setUser(session.user);
           setShowAuthModal(false);
-          if (session?.user) {
+          setIsLoading(false);
+          
+          if (event === 'SIGNED_IN') {
             await createUserProfileIfNeeded(session.user);
           }
-        }
-
-        if (event === 'SIGNED_OUT') {
-          console.log('ProtectedRoute: User signed out');
+        } else {
+          setUser(null);
           setShowAuthModal(true);
+          setIsLoading(false);
         }
       }
     );
-    
-    // Quick session check with 2 second timeout
-    const timeoutId = setTimeout(() => {
-      if (mounted && isLoading) {
-        console.log('ProtectedRoute: Quick timeout - showing auth');
-        setIsLoading(false);
-        setShowAuthModal(true);
-      }
-    }, 2000);
     
     checkSession();
 
     return () => {
       mounted = false;
-      clearTimeout(timeoutId);
       subscription.unsubscribe();
     };
   }, []);
@@ -125,7 +110,6 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   };
 
   if (isLoading) {
-    console.log('ProtectedRoute: Checking auth...');
     return fallback || (
       <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 flex items-center justify-center">
         <div className="text-center space-y-3">
@@ -137,7 +121,6 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   }
 
   if (!user) {
-    console.log('ProtectedRoute: No user, showing auth screen');
     return (
       <>
         <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 flex items-center justify-center">
@@ -146,7 +129,6 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
             <p className="text-muted-foreground">
               Sign in to upload and analyze commercial real estate documents with AI.
             </p>
-            {/* Add a manual sign in button as backup */}
             {!showAuthModal && (
               <Button 
                 onClick={() => setShowAuthModal(true)}
@@ -166,5 +148,6 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     );
   }
 
+  // User is authenticated - just render children
   return <>{children}</>;
 };
