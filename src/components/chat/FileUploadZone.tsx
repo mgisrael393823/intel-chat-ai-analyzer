@@ -115,11 +115,14 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
           >
             <input
               type="file"
+              id="pdf-upload"
+              name="pdf-upload"
               accept=".pdf"
               multiple
               onChange={handleFileInput}
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               disabled={isUploading}
+              aria-label="Upload PDF files"
             />
             
             <Upload className={`mx-auto h-12 w-12 mb-4 transition-colors duration-200 ${

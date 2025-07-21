@@ -60,6 +60,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         <div className="relative">
           <Textarea
             ref={textareaRef}
+            id="chat-message"
+            name="message"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -67,6 +69,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             disabled={disabled || isStreaming}
             className="resize-none pr-24 min-h-[44px] max-h-[120px] bg-background/50 border-border/50 focus:border-primary/50 transition-all duration-200"
             maxLength={maxLength}
+            autoComplete="off"
           />
           
           <div className="absolute right-2 bottom-2 flex items-center space-x-2">
