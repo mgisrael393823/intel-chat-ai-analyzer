@@ -1,5 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
-import { useAuthSession } from './useAuthSession';
+import { authService } from '@/services/AuthService';
 
 export interface UploadedFile {
   id: string;
@@ -28,24 +28,10 @@ export const useSupabase = () => {
     console.log('📁 uploadFile called with:', { name: file.name, size: file.size, type: file.type });
     
     try {
-      // Get auth token from localStorage to avoid hanging
-      const storageKey = `sb-${supabase.supabaseUrl.split('//')[1].split('.')[0]}-auth-token`;
-      const storedSession = localStorage.getItem(storageKey);
-      
-      let userId: string | undefined;
-      let userEmail: string | undefined;
-      
-      if (storedSession) {
-        try {
-          const parsed = JSON.parse(storedSession);
-          const user = parsed?.user;
-          userId = user?.id;
-          userEmail = user?.email;
-        } catch (e) {
-          console.error('Failed to parse stored session:', e);
-        }
-      }
-      
+      const session = await authService.getSession();
+      const userId = session?.user?.id;
+      const userEmail = session?.user?.email;
+
       if (!userId) {
         throw new Error('Authentication required. Please sign in to upload files.');
       }
@@ -222,14 +208,12 @@ export const useSupabase = () => {
     onProgress?: (data: any) => void
   ): Promise<boolean> => {
     try {
-      // Get session properly without hanging
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError || !session) {
-        console.error('Session error:', sessionError);
+      const session = await authService.getSession();
+
+      if (!session) {
         throw new Error('Authentication required');
       }
-      
+
       const token = session.access_token;
 
       // Call the extract-pdf-text function directly
@@ -356,26 +340,9 @@ export const useSupabase = () => {
     try {
       console.log('🔍 [SEND MESSAGE ENTRY] - inside try block');
       
-      // Try getting the session from localStorage directly to avoid hanging
-      console.log('… attempting to get session from localStorage');
-      const storageKey = `sb-${supabase.supabaseUrl.split('//')[1].split('.')[0]}-auth-token`;
-      console.log('Storage key:', storageKey);
-      
-      const storedSession = localStorage.getItem(storageKey);
-      console.log('Stored session exists:', !!storedSession);
-      
-      let token: string | undefined;
-      
-      if (storedSession) {
-        try {
-          const parsed = JSON.parse(storedSession);
-          token = parsed?.access_token;
-          console.log('✅ Got token from localStorage:', token?.slice(0,20) + '...');
-        } catch (e) {
-          console.error('Failed to parse stored session:', e);
-        }
-      }
-      
+      const session = await authService.getSession();
+      const token = session?.access_token;
+
       if (!token) {
         console.log('⚠️ No token found, authentication required');
         onError?.('Please sign in to send messages');
@@ -507,9 +474,9 @@ export const useSupabase = () => {
 
   const generateSnapshot = async (documentId: string) => {
     try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError || !session) {
+      const session = await authService.getSession();
+
+      if (!session) {
         throw new Error('Authentication required');
       }
 
