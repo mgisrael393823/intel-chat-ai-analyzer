@@ -108,7 +108,7 @@ serve(async (req) => {
       throw new Error('Failed to save message');
     }
 
-    // Enhanced system prompt with financial document expertise
+    // Enhanced system prompt
     let systemPrompt = `You are an expert commercial real estate analyst and investment advisor with deep expertise in analyzing offering memorandums (OMs), investment packages, and financial documents.
 
 **Your Core Expertise:**
@@ -137,7 +137,7 @@ serve(async (req) => {
 
 Always be thorough, professional, and focused on helping users make informed investment decisions.`;
     
-    // Get document context with validation
+    // Get document context with enhanced validation
     if (documentId) {
       const { data: document } = await supabaseAdmin
         .from('documents')
@@ -146,89 +146,70 @@ Always be thorough, professional, and focused on helping users make informed inv
         .single();
 
       if (document) {
+        console.log(`Document status: ${document.status}, Text length: ${document.extracted_text?.length || 0}`);
+        
         if (document.status === 'error') {
           systemPrompt += `\n\n**DOCUMENT ERROR:**
 Document "${document.name}" failed to process. Error: ${document.error_message || 'Unknown error'}
-Please inform the user that the document needs to be re-uploaded or re-processed.`;
+Please inform the user that the document needs to be re-uploaded for analysis.`;
         } else if (document.status === 'processing') {
           systemPrompt += `\n\n**DOCUMENT PROCESSING:**
-Document "${document.name}" is still being processed. Please inform the user to wait for processing to complete before asking detailed questions.`;
+Document "${document.name}" is still being processed. Please inform the user to wait a moment for processing to complete before asking detailed questions.`;
         } else if (document.extracted_text && document.status === 'ready') {
-          // Validate that extracted text is actually readable (not binary data)
-          const textSample = document.extracted_text.substring(0, 200);
-          const isBinaryData = textSample.includes('<<') && textSample.includes('>>') && textSample.includes('/');
+          // Enhanced validation for binary data
+          const textSample = document.extracted_text.substring(0, 500);
+          const hasBinaryIndicators = textSample.includes('<<') && textSample.includes('>>') && textSample.includes('/');
           const hasReadableText = /[a-zA-Z]{10,}/.test(textSample);
+          const wordCount = (document.extracted_text.match(/\b[a-zA-Z]{3,}\b/g) || []).length;
           
-          if (isBinaryData && !hasReadableText) {
-            console.log('Detected binary data in extracted_text, marking for re-processing');
+          if (hasBinaryIndicators || !hasReadableText || wordCount < 10) {
+            console.log('Detected corrupted document data - marking for re-processing');
             
             // Mark document for re-processing
             await supabaseAdmin
               .from('documents')
               .update({ 
                 status: 'error',
-                error_message: 'Binary data detected - needs re-processing'
+                error_message: 'Document contains corrupted data and needs re-processing'
               })
               .eq('id', documentId);
               
             systemPrompt += `\n\n**DOCUMENT RE-PROCESSING NEEDED:**
-Document "${document.name}" contains binary data instead of readable text and needs to be re-processed. Please inform the user that there was an issue with text extraction and they should try re-uploading the document.`;
+Document "${document.name}" appears to have corrupted or binary data instead of readable text. Please inform the user that there was an issue with text extraction and they should re-upload the document for proper analysis.`;
           } else {
             // Use extracted text if it's valid
-            const maxContextLength = 20000; // Increased context window
+            const maxContextLength = 25000;
             let documentContext = document.extracted_text;
             
-            console.log(`Document context available: ${documentContext.length} characters`);
+            console.log(`Valid document context available: ${documentContext.length} characters, ${wordCount} words`);
             
             if (documentContext.length > maxContextLength) {
-              // Intelligent truncation - prioritize financial sections
-              const sections = documentContext.split(/\n\s*\n/);
-              let truncatedContext = '';
-              let prioritySections = '';
-              
-              // Look for financial keywords first
-              const financialKeywords = /(?:noi|net operating income|cap rate|cash flow|rent roll|financial|income|expenses|returns?|irr|investment|property|lease|tenant)/i;
-              
-              for (const section of sections) {
-                if (financialKeywords.test(section)) {
-                  if (prioritySections.length + section.length < maxContextLength * 0.7) {
-                    prioritySections += section + '\n\n';
-                  }
-                }
-              }
-              
-              // Fill remaining space with other content
-              const remainingSpace = maxContextLength - prioritySections.length;
-              for (const section of sections) {
-                if (!financialKeywords.test(section) && truncatedContext.length + section.length < remainingSpace) {
-                  truncatedContext += section + '\n\n';
-                }
-              }
-              
-              documentContext = prioritySections + truncatedContext;
+              // Intelligent truncation focusing on key sections
+              documentContext = documentContext.substring(0, maxContextLength);
             }
 
             systemPrompt += `\n\n**CURRENT DOCUMENT ANALYSIS:**
 Document: "${document.name}"
 Type: ${document.type || 'PDF'}
 Size: ${Math.round((document.size || 0) / 1024)} KB
-Status: ${document.status}
+Status: Ready for analysis
+Word Count: ${wordCount}
 
-**FULL DOCUMENT CONTENT:**
+**DOCUMENT CONTENT:**
 ${documentContext}
 
 **ANALYSIS INSTRUCTIONS:**
 - This document contains commercial real estate information that you should analyze thoroughly
-- Look for key financial metrics, property details, market information, and investment terms
 - Reference specific numbers, percentages, and data points from the document in your responses
-- If the user asks general questions, relate them back to this specific property/deal when relevant
-- Focus on practical investment insights and actionable recommendations`;
+- Focus on financial metrics, property details, market information, and investment terms
+- Provide practical investment insights and actionable recommendations
+- If the user asks general questions, relate them back to this specific property/deal when relevant`;
             
-            console.log(`Enhanced document context prepared: ${documentContext.length} characters`);
+            console.log(`Enhanced document context prepared for analysis`);
           }
         } else {
-          console.log('No extracted text found for document');
-          systemPrompt += `\n\nNote: Document "${document?.name || 'Unknown'}" is available but text extraction may still be in progress or failed. If the user asks about the document, let them know the content is not yet accessible for analysis.`;
+          console.log('No extracted text available for document');
+          systemPrompt += `\n\nNote: Document "${document?.name || 'Unknown'}" is available but text content is not yet accessible for analysis. If the user asks about the document, let them know the content extraction may still be in progress.`;
         }
       }
     }
@@ -237,7 +218,6 @@ ${documentContext}
     let openaiResponse;
     
     try {
-      // Use GPT-4o for better document analysis
       openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -250,7 +230,7 @@ ${documentContext}
             { role: 'system', content: systemPrompt },
             { role: 'user', content: message }
           ],
-          temperature: 0.1, // Lower for more consistent analysis
+          temperature: 0.1,
           stream: true,
           max_tokens: 3000,
         }),

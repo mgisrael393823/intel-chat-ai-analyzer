@@ -1,6 +1,5 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { ChatMessage, Message } from './ChatMessage';
 import { Button } from '@/components/ui/button';
 
@@ -10,7 +9,7 @@ interface ChatMessagesProps {
 }
 
 export const ChatMessages: React.FC<ChatMessagesProps> = React.memo(({ messages, isStreaming }) => {
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
@@ -35,12 +34,10 @@ export const ChatMessages: React.FC<ChatMessagesProps> = React.memo(({ messages,
     }
   }, [messages, isUserScrolling, scrollToBottom]);
 
-  // Enhanced scroll detection
+  // Enhanced scroll detection with native scrolling
   useEffect(() => {
-    if (!scrollAreaRef.current) return;
-    
-    const scrollElement = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
-    if (!scrollElement) return;
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
     
     const handleScroll = () => {
       // Clear existing timeout
@@ -48,9 +45,9 @@ export const ChatMessages: React.FC<ChatMessagesProps> = React.memo(({ messages,
         clearTimeout(scrollTimeoutRef.current);
       }
       
-      const scrollTop = scrollElement.scrollTop;
-      const scrollHeight = scrollElement.scrollHeight;
-      const clientHeight = scrollElement.clientHeight;
+      const scrollTop = scrollContainer.scrollTop;
+      const scrollHeight = scrollContainer.scrollHeight;
+      const clientHeight = scrollContainer.clientHeight;
       
       // Check if at bottom (within 100px for better UX)
       const isAtBottom = scrollTop >= scrollHeight - clientHeight - 100;
@@ -66,13 +63,13 @@ export const ChatMessages: React.FC<ChatMessagesProps> = React.memo(({ messages,
       }
     };
     
-    scrollElement.addEventListener('scroll', handleScroll, { passive: true });
+    scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
     
     // Initial check
     handleScroll();
     
     return () => {
-      scrollElement.removeEventListener('scroll', handleScroll);
+      scrollContainer.removeEventListener('scroll', handleScroll);
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
       }
@@ -99,8 +96,15 @@ export const ChatMessages: React.FC<ChatMessagesProps> = React.memo(({ messages,
 
   return (
     <div className="flex-1 relative min-h-0">
-      <ScrollArea ref={scrollAreaRef} className="h-full w-full">
-        <div className="p-4 space-y-4 scroll-smooth">
+      <div 
+        ref={scrollContainerRef}
+        className="h-full w-full overflow-y-auto scroll-smooth"
+        style={{ 
+          scrollBehavior: 'smooth',
+          WebkitOverflowScrolling: 'touch' // Better mobile scrolling
+        }}
+      >
+        <div className="p-4 space-y-4">
           {messages.map((message, index) => (
             <div key={message.id}>
               <ChatMessage 
@@ -128,7 +132,7 @@ export const ChatMessages: React.FC<ChatMessagesProps> = React.memo(({ messages,
           {/* Invisible div to scroll to */}
           <div ref={messagesEndRef} />
         </div>
-      </ScrollArea>
+      </div>
       
       {/* Show scroll to bottom button when user has scrolled up */}
       {isUserScrolling && (
