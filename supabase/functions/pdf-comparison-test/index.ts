@@ -66,7 +66,7 @@ async function testPDFJS(): Promise<{ success: boolean, extractedText?: string, 
     const textContent = await page.getTextContent();
     
     const extractedText = textContent.items
-      .map((item: any) => item.str)
+      .map((item: { str: string }) => item.str)
       .join(" ")
       .trim();
     
@@ -90,47 +90,7 @@ async function testPDFJS(): Promise<{ success: boolean, extractedText?: string, 
   }
 }
 
-// Option 2: unpdf approach
-async function testUnpdf(): Promise<{ success: boolean, extractedText?: string, error?: string, timeMs?: number }> {
-  const startTime = Date.now();
-  
-  try {
-    console.log("Testing unpdf import...");
-    const unpdfModule = await import("https://esm.sh/unpdf@0.11.0");
-    const { extractText } = unpdfModule.default || unpdfModule;
-    
-    console.log("unpdf imported successfully, testing extraction...");
-    const testBuffer = createTestPDF();
-    
-    const result = await extractText(testBuffer);
-    const extractedText = Array.isArray(result) ? result.join(" ") : result;
-    
-    return { 
-      success: true, 
-      extractedText: extractedText.trim(), 
-      timeMs: Date.now() - startTime 
-    };
-  } catch (error) {
-    console.log("unpdf failed, trying pdf2json fallback...");
-    try {
-      const pdf2jsonModule = await import("https://esm.sh/pdf2json@3.1.4");
-      // pdf2json has different API, would need file path
-      console.log("pdf2json imported but needs file system access");
-      return { 
-        success: false, 
-        error: "pdf2json requires file system access, not suitable for edge runtime",
-        timeMs: Date.now() - startTime 
-      };
-    } catch (altError) {
-      console.error("Both unpdf and pdf2json failed:", error, altError);
-      return { 
-        success: false, 
-        error: `unpdf: ${error.message}, pdf2json: ${altError.message}`, 
-        timeMs: Date.now() - startTime 
-      };
-    }
-  }
-}
+
 
 // Option 3: Minimal PDF parser (custom implementation)
 async function testMinimalParser(): Promise<{ success: boolean, extractedText?: string, error?: string, timeMs?: number }> {
@@ -190,7 +150,6 @@ serve(async (req) => {
     expectedText: "Hello World PDF Test",
     tests: {
       pdfjs: await testPDFJS(),
-      unpdf: await testUnpdf(), 
       minimal: await testMinimalParser()
     },
     analysis: {
@@ -209,10 +168,6 @@ serve(async (req) => {
     results.analysis.accuracy.push(`PDF.js: "${tests.pdfjs.extractedText}" (${tests.pdfjs.extractedText?.length || 0} chars)`);
   }
   
-  if (tests.unpdf.success) {
-    results.analysis.performance.push(`unpdf: ${tests.unpdf.timeMs}ms - Potentially faster`);
-    results.analysis.accuracy.push(`unpdf: "${tests.unpdf.extractedText}" (${tests.unpdf.extractedText?.length || 0} chars)`);
-  }
   
   if (tests.minimal.success) {
     results.analysis.performance.push(`Minimal: ${tests.minimal.timeMs}ms - Fastest`);
@@ -220,16 +175,13 @@ serve(async (req) => {
   }
   
   // Generate recommendations
-  const successCount = [tests.pdfjs.success, tests.unpdf.success, tests.minimal.success].filter(Boolean).length;
+  const successCount = [tests.pdfjs.success, tests.minimal.success].filter(Boolean).length;
   
   if (successCount === 0) {
     results.analysis.recommendations.push("⚠️ All parsers failed - investigate Edge Runtime compatibility");
   } else {
     if (tests.pdfjs.success) {
       results.analysis.recommendations.push("✅ PDF.js: Proven, accurate, but largest bundle");
-    }
-    if (tests.unpdf.success) {
-      results.analysis.recommendations.push("✅ unpdf: Modern alternative worth considering");
     }
     if (tests.minimal.success) {
       results.analysis.recommendations.push("✅ Minimal: Ultra-light fallback option");

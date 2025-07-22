@@ -31,6 +31,7 @@ const App = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isStreaming, setIsStreaming] = useState(false);
+  const controllerRef = useRef<AbortController | null>(null);
   const [currentThreadId, setCurrentThreadId] = useState<string | undefined>();
   const [streamingMessage, setStreamingMessage] = useState<string>('');
   
@@ -163,6 +164,10 @@ const App = () => {
     // Get the most recent document for context
     const documentId = uploadedDocuments.length > 0 ? uploadedDocuments[0].id : undefined;
 
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+
     await sendMessage(
       content,
       currentThreadId,
@@ -197,26 +202,32 @@ const App = () => {
       (error: string) => {
         setIsStreaming(false);
         setStreamingMessage('');
-        
+
+        if (error === 'aborted') {
+          setMessages(prev => prev.filter(m => m.id !== tempAssistantMessage.id));
+          return;
+        }
+
         // Replace streaming message with error
-        setMessages(prevMessages => 
-          prevMessages.map(msg => 
-            msg.id === tempAssistantMessage.id 
-              ? { 
-                  ...msg, 
-                  content: `Sorry, I encountered an error: ${error}`, 
-                  status: 'error' 
+        setMessages(prevMessages =>
+          prevMessages.map(msg =>
+            msg.id === tempAssistantMessage.id
+              ? {
+                  ...msg,
+                  content: `Sorry, I encountered an error: ${error}`,
+                  status: 'error'
                 }
               : msg
           )
         );
-      }
+      },
+      controller.signal
     );
   };
 
   const handleStopGeneration = () => {
     setIsStreaming(false);
-    // TODO: Implement actual stream cancellation
+    controllerRef.current?.abort();
   };
 
   const handleSignOut = async () => {

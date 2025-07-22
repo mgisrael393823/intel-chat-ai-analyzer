@@ -26,8 +26,6 @@ export interface Document {
 export const useSupabase = () => {
   const uploadFile = async (file: File): Promise<Document> => {
     // Upload file to Supabase Storage
-
-    try {
       const session = await authService.getSessionWithTimeout();
       if (!session) {
         throw new Error('Authentication required. Please sign in to upload files.');
@@ -109,10 +107,7 @@ export const useSupabase = () => {
       
       // Return the document immediately (extraction happens in background)
       return documentData as Document;
-    } catch (error) {
-      throw error;
-    }
-  };
+    };
 
   const getDocument = async (id: string): Promise<Document | null> => {
     try {
@@ -163,8 +158,8 @@ export const useSupabase = () => {
         const { error: storageError } = await supabase.storage
           .from('documents')
           .remove([fileName]);
-
         if (storageError) {
+          throw new Error(storageError.message);
         }
       }
 
@@ -259,7 +254,8 @@ export const useSupabase = () => {
     documentId?: string,
     onChunk?: (content: string) => void,
     onComplete?: (threadId: string, messageId: string) => void,
-    onError?: (error: string) => void
+    onError?: (error: string) => void,
+    signal?: AbortSignal
   ): Promise<void> => {
     try {
       const session = await authService.getSessionWithTimeout();
@@ -275,7 +271,8 @@ export const useSupabase = () => {
           'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ message, threadId, documentId })
+        body: JSON.stringify({ message, threadId, documentId }),
+        signal
       });
 
       if (!response.ok) {
@@ -357,6 +354,10 @@ export const useSupabase = () => {
         }
       }
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        onError?.('aborted');
+        return;
+      }
       let errorMessage = 'Failed to send message';
       if (error instanceof Error) {
         errorMessage = error.message;
@@ -411,11 +412,10 @@ export const useSupabase = () => {
   };
 
   const generateSnapshot = async (documentId: string) => {
-    try {
-      const session = await authService.getSessionWithTimeout();
-      if (!session) {
-        throw new Error('Authentication required');
-      }
+    const session = await authService.getSessionWithTimeout();
+    if (!session) {
+      throw new Error('Authentication required');
+    }
 
       const { data, error } = await supabase.functions.invoke('generate-snapshot', {
         body: { documentId },
@@ -428,10 +428,7 @@ export const useSupabase = () => {
         throw new Error(error.message || 'Failed to generate snapshot');
       }
 
-      return data;
-    } catch (error) {
-      throw error;
-    }
+    return data;
   };
 
   return { 

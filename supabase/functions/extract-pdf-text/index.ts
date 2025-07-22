@@ -1,61 +1,17 @@
 console.log("⚡️ PDF Extraction Function initializing…");
 
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getDocument } from "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.js";
 
 console.log("✅ Basic imports loaded successfully");
 
-// Primary: PDF.js via CDN for robust text extraction (loaded dynamically)
-let pdfjs: any = null;
-let pdfJsAvailable = false;
-
-// Dynamic PDF.js loader - using legacy build for Edge Runtime compatibility
-async function loadPDFJS(): Promise<boolean> {
-  if (pdfjs !== null) {
-    return pdfJsAvailable; // Already tried loading
-  }
-  
-  try {
-    console.log("🔄 Loading PDF.js legacy build...");
-    // Use legacy build designed for environments without DOM/worker support
-    const pdfModule = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.js");
-    
-    // Handle different export patterns for legacy build
-    const getDocument = pdfModule.getDocument || pdfModule.default?.getDocument || pdfModule;
-    if (!getDocument || typeof getDocument !== 'function') {
-      throw new Error("getDocument not found in PDF.js legacy module");
-    }
-    
-    // NO worker configuration needed for legacy build - it's designed to run without workers
-    pdfjs = { getDocument };
-    pdfJsAvailable = true;
-    console.log("✅ PDF.js legacy build loaded successfully (no worker required)");
-    return true;
-  } catch (legacyError) {
-    console.warn("⚠️ PDF.js legacy build failed, trying regular build with no-worker:", legacyError.message);
-    
-    // Fallback: try regular build but completely bypass worker setup
-    try {
-      console.log("🔄 Trying regular PDF.js build with worker bypass...");
-      const pdfModule = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.js");
-      
-      const getDocument = pdfModule.getDocument || pdfModule.default?.getDocument;
-      if (!getDocument) {
-        throw new Error("getDocument not found in regular PDF.js module");
-      }
-      
-      // Store reference without any worker setup
-      pdfjs = { getDocument };
-      pdfJsAvailable = true;
-      console.log("✅ PDF.js regular build loaded (worker setup skipped)");
-      return true;
-    } catch (regularError) {
-      console.error("⚠️ Both legacy and regular PDF.js builds failed:", regularError.message);
-      pdfjs = null;
-      pdfJsAvailable = false;
-      return false;
-    }
-  }
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout = 10000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  const res = await fetch(url, { ...options, signal: controller.signal });
+  clearTimeout(id);
+  return res;
 }
 
 const corsHeaders = {
@@ -74,7 +30,7 @@ async function extractTextWithPDFJS(buffer: ArrayBuffer): Promise<string> {
     console.log(`Loading PDF document... (${data.length} bytes)`)
     
     // Configure PDF.js for Edge Runtime compatibility
-    const loadingTask = pdfjs.getDocument({
+    const loadingTask = getDocument({
       data,
       disableWorker: true,        // Force main-thread processing (no DOM required)
       standardFontDataUrl: false, // No external font fetches
@@ -97,7 +53,7 @@ async function extractTextWithPDFJS(buffer: ArrayBuffer): Promise<string> {
         
         // Extract text from page items with proper spacing
         const pageText = textContent.items
-          .map((item: any) => item.str)
+          .map((item: { str: string }) => item.str)
           .join(" ")
           .trim()
         
@@ -171,19 +127,13 @@ async function extractTextFromPDF(buffer: ArrayBuffer): Promise<{ text: string, 
   let extractedText = ""
   let method = "unknown"
   
-  // Try to load PDF.js dynamically and use it
-  const pdfJsLoaded = await loadPDFJS()
-  if (pdfJsLoaded) {
-    try {
-      extractedText = await extractTextWithPDFJS(buffer)
-      method = "pdfjs-cdn"
-      console.log(`✅ Used PDF.js CDN extraction: ${extractedText.length} chars`)
-    } catch (pdfJsError) {
-      console.warn("⚠️ PDF.js extraction failed, falling back to ASCII:", pdfJsError.message)
-      // Fall through to ASCII method
-    }
-  } else {
-    console.log("📝 PDF.js dynamic loading failed, using ASCII fallback")
+  try {
+    extractedText = await extractTextWithPDFJS(buffer)
+    method = "pdfjs-cdn"
+    console.log(`✅ Used PDF.js CDN extraction: ${extractedText.length} chars`)
+  } catch (pdfJsError) {
+    console.warn("⚠️ PDF.js extraction failed, falling back to ASCII:", pdfJsError.message)
+    // Fall through to ASCII method
   }
   
   // Use ASCII fallback if PDF.js failed or unavailable
@@ -266,12 +216,9 @@ serve(async (req) => {
     if (documentId === 'health-check') {
       console.log("🔍 Running comprehensive health check...");
       const startTime = Date.now();
-      
-      const pdfJsLoaded = await loadPDFJS();
-      
+
       let testResult = null;
-      if (pdfJsLoaded) {
-        try {
+      try {
           // Create minimal test PDF
           const testPdfContent = `%PDF-1.4
 1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
@@ -292,7 +239,7 @@ trailer<</Size 5/Root 1 0 R>>startxref 320%%EOF`;
           console.log(`Testing PDF.js with ${testBuffer.length} byte test PDF`);
           
           // Use same Edge Runtime compatible configuration
-          const loadingTask = pdfjs.getDocument({
+          const loadingTask = getDocument({
             data: testBuffer,
             disableWorker: true,        // Force main-thread processing
             standardFontDataUrl: false, // No external font fetches  
@@ -301,7 +248,7 @@ trailer<</Size 5/Root 1 0 R>>startxref 320%%EOF`;
           const pdf = await loadingTask.promise;
           const page = await pdf.getPage(1);
           const textContent = await page.getTextContent();
-          const extractedText = textContent.items.map((item: any) => item.str).join(" ");
+          const extractedText = textContent.items.map((item: { str: string }) => item.str).join(" ");
           
           // Clean up
           if (pdf.destroy) await pdf.destroy();
@@ -320,14 +267,13 @@ trailer<</Size 5/Root 1 0 R>>startxref 320%%EOF`;
           };
           console.error("❌ PDF.js test extraction failed:", testError);
         }
-      }
-      
+
       return new Response(
-        JSON.stringify({ 
+        JSON.stringify({
           status: 'healthy',
           timestamp: new Date().toISOString(),
           pdfJs: {
-            available: pdfJsLoaded,
+            available: true,
             test: testResult
           },
           asciiParser: {
@@ -390,18 +336,15 @@ trailer<</Size 5/Root 1 0 R>>startxref 320%%EOF`;
       const filePath = urlParts.slice(pathIndex + 1).join('/');
       console.log('Extracted file path:', filePath);
       
-      // Use service role client to download directly from storage
-      const { data: fileData, error: downloadError } = await supabaseClient.storage
-        .from('documents')
-        .download(filePath);
-      
-      if (downloadError || !fileData) {
-        console.error('Storage download error:', downloadError);
-        throw new Error(`Failed to download PDF from storage: ${downloadError?.message || 'No file data'}`);
+      // Download PDF with timeout
+      const downloadUrl = `${supabaseUrl}/storage/v1/object/public/documents/${filePath}`;
+      const downloadRes = await fetchWithTimeout(downloadUrl, {
+        headers: { Authorization: `Bearer ${supabaseServiceKey}` }
+      }, 10000);
+      if (!downloadRes.ok) {
+        throw new Error(`Failed to download PDF: ${downloadRes.status}`);
       }
-
-      // Convert Blob to ArrayBuffer
-      const pdfBuffer = await fileData.arrayBuffer();
+      const pdfBuffer = await downloadRes.arrayBuffer();
       console.log(`PDF downloaded via storage API: ${pdfBuffer.byteLength} bytes`)
       
       // Extract text using intelligent method selection with fallback
@@ -441,8 +384,7 @@ trailer<</Size 5/Root 1 0 R>>startxref 320%%EOF`;
           textLength: extractedText.length,
           chunks: chunks.length,
           method: method,
-          pdfJsAvailable: pdfJsAvailable,
-          loadedDynamically: pdfjs !== null
+          pdfJsAvailable: true
         }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -466,13 +408,13 @@ trailer<</Size 5/Root 1 0 R>>startxref 320%%EOF`;
         .eq('id', documentId)
 
       return new Response(
-        JSON.stringify({ 
+        JSON.stringify({
           error: 'Failed to extract text from PDF',
-          details: errorMessage 
+          details: errorMessage
         }),
-        { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        {
+          status: 502,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
       )
     }

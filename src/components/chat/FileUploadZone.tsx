@@ -3,6 +3,7 @@ import { Upload, File, X, BarChart3, CheckCircle, AlertCircle, Loader2 } from 'l
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { useSupabase } from '@/hooks/useSupabase';
 import { cn } from '@/lib/utils';
 
@@ -32,7 +33,10 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = memo(({
   uploadProgress
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [generatingSnapshot, setGeneratingSnapshot] = useState<string | null>(null);
+  const [snapshotModalContent, setSnapshotModalContent] = useState<string | null>(null);
+  const [showSnapshotModal, setShowSnapshotModal] = useState(false);
   const { generateSnapshot } = useSupabase();
 
   const formatFileSize = (bytes: number) => {
@@ -56,12 +60,13 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = memo(({
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    
+
     const files = Array.from(e.dataTransfer.files);
-    handleFiles(files);
+    void handleFiles(files);
   }, []);
 
-  const handleFiles = (files: File[]) => {
+  const handleFiles = async (files: File[]) => {
+    setLoading(true);
     // Filter for PDF files only
     const pdfFiles = files.filter(file => file.type === 'application/pdf');
     
@@ -71,13 +76,14 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = memo(({
     }
     
     if (pdfFiles.length > 0) {
-      onFileUpload(pdfFiles);
+      await onFileUpload(pdfFiles);
     }
+    setLoading(false);
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      handleFiles(Array.from(e.target.files));
+      void handleFiles(Array.from(e.target.files));
     }
   };
 
@@ -91,12 +97,15 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = memo(({
     setGeneratingSnapshot(fileId);
     try {
       const result = await generateSnapshot(fileId);
-      // Snapshot generated successfully
-      // TODO: Display snapshot in UI or open modal
-      alert(`Snapshot generated for ${result.documentName}!\n\nProperty: ${result.snapshot.propertyName}\nPrice: $${result.snapshot.askingPrice?.toLocaleString() || 'N/A'}\nCap Rate: ${result.snapshot.capRate || 'N/A'}%`);
+      setSnapshotModalContent(
+        `Snapshot for ${result.documentName}\n\nProperty: ${result.snapshot.propertyName}\nPrice: $${result.snapshot.askingPrice?.toLocaleString() || 'N/A'}\nCap Rate: ${result.snapshot.capRate || 'N/A'}%`
+      );
+      setShowSnapshotModal(true);
     } catch (error) {
-      // Failed to generate snapshot
-      alert(`Failed to generate snapshot: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setSnapshotModalContent(
+        `Failed to generate snapshot: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+      setShowSnapshotModal(true);
     } finally {
       setGeneratingSnapshot(null);
     }
@@ -142,8 +151,8 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = memo(({
             <p className="text-sm text-muted-foreground mb-4">
               Or click to browse and select your offering memorandum
             </p>
-            <Button variant="outline" disabled={isUploading}>
-              Choose Files
+            <Button variant="outline" disabled={isUploading || loading}>
+              {loading ? 'Processing...' : 'Choose Files'}
             </Button>
             
             {isUploading && (
@@ -288,6 +297,16 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = memo(({
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {showSnapshotModal && (
+        <Dialog open={showSnapshotModal} onOpenChange={setShowSnapshotModal}>
+          <DialogContent>
+            <pre className="whitespace-pre-wrap text-sm">
+              {snapshotModalContent}
+            </pre>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

@@ -1,7 +1,11 @@
 import { assertEquals, assertExists } from "https://deno.land/std@0.168.0/testing/asserts.ts";
 
 // Mock Supabase client
-const createMockSupabaseClient = (mockDocument: any, mockFileData: Blob | null, downloadError: any = null) => {
+const createMockSupabaseClient = (
+  mockDocument: Record<string, unknown>,
+  mockFileData: Blob | null,
+  downloadError: unknown = null
+) => {
   return {
     from: (table: string) => {
       if (table === 'documents') {
