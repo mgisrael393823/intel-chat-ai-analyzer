@@ -278,8 +278,24 @@ export const useSupabase = () => {
         body: JSON.stringify({ message, threadId, documentId })
       });
 
-      if (!response.ok || !response.body) {
-        onError?.(`HTTP ${response.status}`);
+      if (!response.ok) {
+        // Try to get error details from response
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+          const errorData = await response.json();
+          if (errorData.error) {
+            errorMessage = errorData.error;
+          }
+        } catch {
+          // If we can't parse JSON, use status text
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        }
+        onError?.(errorMessage);
+        return;
+      }
+      
+      if (!response.body) {
+        onError?.('No response body received');
         return;
       }
 
@@ -332,7 +348,17 @@ export const useSupabase = () => {
         }
       }
     } catch (error) {
-      onError?.(error instanceof Error ? error.message : 'Failed to send message');
+      let errorMessage = 'Failed to send message';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        // Add more context for common errors
+        if (error.message.includes('Failed to fetch')) {
+          errorMessage = 'Network error: Unable to connect to the server';
+        } else if (error.message.includes('Unauthorized')) {
+          errorMessage = 'Authentication error: Please sign in again';
+        }
+      }
+      onError?.(errorMessage);
     }
   };
 
