@@ -117,8 +117,24 @@ serve(async (req) => {
       throw new Error('Failed to save message');
     }
 
-    // Prepare system prompt
-    let systemPrompt = "You are a helpful AI assistant specializing in commercial real estate analysis. Provide clear, accurate, and insightful answers about offering memorandums and real estate investments.";
+    // Enhanced system prompt for commercial real estate analysis
+    let systemPrompt = `You are an expert commercial real estate analyst and investment advisor. You specialize in analyzing offering memorandums, investment opportunities, and providing insights on commercial real estate deals.
+
+Your expertise includes:
+- Financial analysis (NOI, cap rates, cash flow, valuation)
+- Market analysis and comparables
+- Due diligence considerations
+- Investment risk assessment
+- Property types (multifamily, office, retail, industrial, mixed-use)
+
+When analyzing documents or answering questions:
+1. Provide specific, data-driven insights
+2. Reference exact figures from the document when available
+3. Offer practical investment perspectives
+4. Highlight both opportunities and risks
+5. Use industry-standard terminology and metrics
+
+Be professional, thorough, and actionable in your responses.`;
     
     // Get document context if provided
     if (documentId) {
@@ -129,10 +145,28 @@ serve(async (req) => {
         .single();
 
       if (document?.extracted_text) {
-        systemPrompt = `You are a helpful AI assistant specializing in commercial real estate analysis. You have access to an offering memorandum titled "${document.name}". Use this document to provide accurate answers about the property and investment opportunity. Always cite specific information from the document when answering questions.`;
+        const maxContextLength = 10000; // Increased context window
+        let documentContext = document.extracted_text;
         
-        // Add document content to system prompt (limited to prevent token overflow)
-        systemPrompt += `\n\nDocument excerpt:\n${document.extracted_text.substring(0, 6000)}`;
+        if (documentContext.length > maxContextLength) {
+          // Try to include the most relevant parts
+          const parts = documentContext.split(/\n\s*\n/);
+          let truncatedContext = '';
+          for (const part of parts) {
+            if (truncatedContext.length + part.length > maxContextLength) {
+              break;
+            }
+            truncatedContext += part + '\n\n';
+          }
+          documentContext = truncatedContext || documentContext.substring(0, maxContextLength);
+        }
+
+        systemPrompt += `\n\nCURRENT DOCUMENT CONTEXT:
+Document: ${document.name}
+Type: ${document.type}
+Content: ${documentContext}
+
+Use this document context to answer questions about the property, financial metrics, and investment opportunity. Reference specific details from the document when relevant.`;
       }
     }
 
@@ -144,21 +178,47 @@ serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: 'gpt-4.1-2025-01-14', // Latest model for better analysis
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: message }
         ],
-        temperature: 0.7,
+        temperature: 0.3, // Lower temperature for more consistent analysis
         stream: true,
-        max_tokens: 1000,
+        max_tokens: 2000, // Increased for detailed responses
       }),
     });
 
     if (!openaiResponse.ok) {
       const errorText = await openaiResponse.text();
       console.error('OpenAI API error:', errorText);
-      throw new Error('Failed to get AI response');
+      
+      // Try fallback with older model
+      console.log('Trying fallback model...');
+      const fallbackResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: message }
+          ],
+          temperature: 0.3,
+          stream: true,
+          max_tokens: 1500,
+        }),
+      });
+      
+      if (!fallbackResponse.ok) {
+        throw new Error('Failed to get AI response from both primary and fallback models');
+      }
+      
+      // Use fallback response
+      openaiResponse = fallbackResponse;
     }
 
     // Create assistant message placeholder

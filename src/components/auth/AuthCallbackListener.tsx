@@ -18,7 +18,7 @@ export const AuthCallbackListener = () => {
         setStatus('Exchanging authentication tokens...');
         
         const { data: { session: urlSession }, error: urlError } = 
-          await supabase.auth.getSessionFromUrl({ storeSession: true });
+          await supabase.auth.getSession();
           
         if (urlError) {
           setStatus('Token exchange failed');

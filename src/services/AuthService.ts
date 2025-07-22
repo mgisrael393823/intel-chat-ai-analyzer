@@ -2,7 +2,7 @@ import { supabase } from '@/integrations/supabase/client';
 import type { Session } from '@supabase/supabase-js';
 
 class AuthService {
-  private storageKey = `sb-${supabase.supabaseUrl.split('//')[1].split('.')[0]}-auth-token`;
+  private storageKey = `sb-npsqlaumhzzlqjtycpim-auth-token`;
 
   async getSessionWithTimeout(timeout = 3000): Promise<Session | null> {
     try {

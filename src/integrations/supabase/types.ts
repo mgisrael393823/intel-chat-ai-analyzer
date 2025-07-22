@@ -14,7 +14,224 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      documents: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          extracted_text: string | null
+          id: string
+          name: string
+          size: number
+          status: string
+          storage_url: string
+          type: string
+          updated_at: string
+          upload_progress: number | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          extracted_text?: string | null
+          id?: string
+          name: string
+          size: number
+          status?: string
+          storage_url: string
+          type?: string
+          updated_at?: string
+          upload_progress?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          extracted_text?: string | null
+          id?: string
+          name?: string
+          size?: number
+          status?: string
+          storage_url?: string
+          type?: string
+          updated_at?: string
+          upload_progress?: number | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      extraction_jobs: {
+        Row: {
+          created_at: string | null
+          document_id: string | null
+          id: number
+          priority: string
+          status: string
+        }
+        Insert: {
+          created_at?: string | null
+          document_id?: string | null
+          id?: number
+          priority?: string
+          status?: string
+        }
+        Update: {
+          created_at?: string | null
+          document_id?: string | null
+          id?: number
+          priority?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extraction_jobs_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          role: string
+          status: string | null
+          thread_id: string
+          updated_at: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          role: string
+          status?: string | null
+          thread_id: string
+          updated_at?: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          role?: string
+          status?: string | null
+          thread_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      threads: {
+        Row: {
+          created_at: string
+          document_id: string | null
+          id: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          document_id?: string | null
+          id?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          document_id?: string | null
+          id?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "threads_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      usage_logs: {
+        Row: {
+          action: string
+          created_at: string
+          document_id: string | null
+          id: string
+          user_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          document_id?: string | null
+          id?: string
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          document_id?: string | null
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "usage_logs_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_profiles: {
+        Row: {
+          created_at: string
+          email: string | null
+          id: string
+          plan_started_at: string | null
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          subscription_plan: string | null
+          subscription_status: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          id: string
+          plan_started_at?: string | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          subscription_plan?: string | null
+          subscription_status?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          id?: string
+          plan_started_at?: string | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          subscription_plan?: string | null
+          subscription_status?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

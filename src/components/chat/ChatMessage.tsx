@@ -9,6 +9,7 @@ export interface Message {
   role: 'user' | 'assistant';
   timestamp: Date;
   isStreaming?: boolean;
+  status?: 'sending' | 'sent' | 'error' | 'streaming';
 }
 
 interface ChatMessageProps {

@@ -157,7 +157,7 @@ const App = () => {
       content: '',
       role: 'assistant',
       timestamp: new Date(),
-      status: 'streaming'
+      status: 'streaming' as const
     };
     setMessages(prev => [...prev, tempAssistantMessage]);
 

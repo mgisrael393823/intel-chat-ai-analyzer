@@ -92,17 +92,20 @@ export const useSupabase = () => {
       // Trigger PDF text extraction asynchronously
       // Note: This is fire-and-forget, we don't await it
       extractPdfText(documentData.id).then(success => {
-      }).catch(error => {
+        // Extraction succeeded
+      }).catch(async (error) => {
         // Update document status to error
-        supabase
-          .from('documents')
-          .update({ 
-            status: 'error',
-            error_message: 'Failed to extract text from PDF'
-          })
-          .eq('id', documentData.id)
-          .then(() => {})
-          .catch(() => {});
+        try {
+          await supabase
+            .from('documents')
+            .update({ 
+              status: 'error',
+              error_message: 'Failed to extract text from PDF'
+            })
+            .eq('id', documentData.id);
+        } catch {
+          // Ignore secondary errors
+        }
       });
       
       // Return the document immediately (extraction happens in background)
@@ -121,7 +124,7 @@ export const useSupabase = () => {
         return null;
       }
 
-      return data;
+      return data as Document;
     } catch (error) {
       return null;
     }
@@ -138,7 +141,7 @@ export const useSupabase = () => {
         return [];
       }
 
-      return data || [];
+      return (data || []) as Document[];
     } catch (error) {
       return [];
     }
@@ -191,7 +194,7 @@ export const useSupabase = () => {
       const token = session.access_token;
 
       // Call the extract-pdf-text function directly
-      const url = `${supabase.supabaseUrl}/functions/v1/extract-pdf-text`;
+      const url = `https://npsqlaumhzzlqjtycpim.supabase.co/functions/v1/extract-pdf-text`;
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -264,7 +267,7 @@ export const useSupabase = () => {
         return;
       }
 
-      const response = await fetch(`${supabase.supabaseUrl}/functions/v1/chat-stream`, {
+      const response = await fetch(`https://npsqlaumhzzlqjtycpim.supabase.co/functions/v1/chat-stream`, {
         method: 'POST',
         cache: 'no-cache',
         headers: {

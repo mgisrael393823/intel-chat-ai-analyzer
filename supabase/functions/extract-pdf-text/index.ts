@@ -11,59 +11,137 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 }
 
-// ASCII-based PDF text extraction (guaranteed to work)
-function extractTextWithASCII(buffer: ArrayBuffer): string {
-  console.log('📝 Starting ASCII fallback text extraction...')
-  const startTime = Date.now()
-  
+// Enhanced PDF text extraction function
+function extractTextFromPDF(pdfBuffer: Uint8Array): string {
   try {
-    // Decode PDF buffer as UTF-8, ignoring invalid sequences
-    const decoder = new TextDecoder('utf-8', { fatal: false })
-    const rawText = decoder.decode(buffer)
+    // Convert buffer to string and look for text content
+    const pdfString = new TextDecoder('latin1').decode(pdfBuffer);
     
-    // Extract printable ASCII characters plus common whitespace
-    // This captures most readable text while filtering binary data
-    const extractedText = rawText
-      .replace(/[^\x20-\x7E\n\r\t]/g, '') // Keep only printable ASCII + whitespace
-      .replace(/\s+/g, ' ') // Normalize multiple whitespace to single spaces
-      .replace(/\s*\n\s*/g, '\n') // Clean up line breaks
-      .trim()
+    // Enhanced PDF text extraction patterns
+    const patterns = [
+      // Standard PDF text objects: (text) Tj
+      /\(([^)]+)\)\s*Tj/g,
+      // Array text objects: [(text)] TJ
+      /\[\(([^)]+)\)\]\s*TJ/g,
+      // Text within parentheses
+      /\(([^)]+)\)/g,
+      // Text between BT and ET operators
+      /BT\s+.*?\s+\(([^)]+)\)\s*.*?ET/gs,
+      // Simple text extraction for headers/titles
+      /\/F\d+\s+\d+\s+Tf[^(]*\(([^)]+)\)/g,
+    ];
     
-    const extractionTime = Date.now() - startTime
-    console.log('✅ ASCII extraction completed:', {
-      bufferSize: buffer.byteLength,
-      extractedLength: extractedText.length,
-      extractionTimeMs: extractionTime
-    })
+    const extractedLines: string[] = [];
     
-    return extractedText
+    // Apply each pattern to extract text
+    for (const pattern of patterns) {
+      let match;
+      while ((match = pattern.exec(pdfString)) !== null) {
+        const text = match[1];
+        if (text && text.length > 1) {
+          // Clean up the extracted text
+          const cleanText = text
+            .replace(/\\n/g, '\n')
+            .replace(/\\r/g, '\r')
+            .replace(/\\t/g, '\t')
+            .replace(/\\\\/g, '\\')
+            .replace(/\\'/g, "'")
+            .replace(/\\"/g, '"')
+            .trim();
+          
+          if (cleanText.length > 2 && !extractedLines.includes(cleanText)) {
+            extractedLines.push(cleanText);
+          }
+        }
+      }
+    }
+    
+    // If we found structured text, use it
+    if (extractedLines.length > 10) {
+      return extractedLines.join('\n').substring(0, 50000); // Limit size
+    }
+    
+    // Fallback: Look for readable ASCII content in the PDF
+    const lines = pdfString.split(/[\r\n]+/);
+    const readableLines: string[] = [];
+    
+    for (const line of lines) {
+      // Filter for lines that contain readable text (letters, numbers, common punctuation)
+      const readable = line.match(/[a-zA-Z0-9\s.,;:!?\-$%()]+/g);
+      if (readable) {
+        const cleanLine = readable.join(' ').trim();
+        // Only include lines with substantial readable content
+        if (cleanLine.length > 10 && cleanLine.match(/[a-zA-Z]{3,}/)) {
+          readableLines.push(cleanLine);
+        }
+      }
+    }
+    
+    return readableLines.slice(0, 500).join('\n').substring(0, 50000);
+    
   } catch (error) {
-    console.error('❌ ASCII extraction failed:', error)
-    throw new Error(`ASCII extraction failed: ${error.message}`)
+    console.error('PDF parsing error:', error);
+    throw new Error('Failed to parse PDF content');
   }
 }
 
-// Simple extraction function using ASCII only
-async function extractTextFromPDF(buffer: ArrayBuffer): Promise<{ text: string, method: string }> {
-  const MAX_CHARS = 100000
-  let extractedText = ""
-  let method = "ascii-fallback"
+// Validate extracted text quality
+function validateTextQuality(text: string): { isValid: boolean; quality: number; reason?: string } {
+  if (!text || text.length < 100) {
+    return { isValid: false, quality: 0, reason: 'Text too short' };
+  }
+  
+  // Count readable characters vs total characters
+  const readableChars = text.match(/[a-zA-Z0-9\s.,;:!?\-$%()]/g)?.length || 0;
+  const totalChars = text.length;
+  const readabilityRatio = readableChars / totalChars;
+  
+  // Count words
+  const words = text.match(/\b[a-zA-Z]{2,}\b/g)?.length || 0;
+  
+  // Calculate quality score
+  const quality = Math.min(100, Math.round(readabilityRatio * 70 + (words / text.length) * 300));
+  
+  if (readabilityRatio < 0.6) {
+    return { isValid: false, quality, reason: 'Low readability ratio' };
+  }
+  
+  if (words < 50) {
+    return { isValid: false, quality, reason: 'Too few words detected' };
+  }
+  
+  return { isValid: true, quality };
+}
+
+// Extract and validate text from PDF
+async function extractAndValidateText(buffer: ArrayBuffer): Promise<{ text: string, quality: number, method: string }> {
+  const MAX_CHARS = 50000;
   
   try {
-    extractedText = extractTextWithASCII(buffer)
-    console.log(`✅ Used ASCII fallback extraction: ${extractedText.length} chars`)
-  } catch (asciiError) {
-    console.error("❌ ASCII extraction failed:", asciiError.message)
-    throw new Error(`Text extraction failed: ${asciiError.message}`)
+    // Convert ArrayBuffer to Uint8Array for processing
+    const pdfBuffer = new Uint8Array(buffer);
+    const extractedText = extractTextFromPDF(pdfBuffer);
+    
+    // Validate text quality
+    const validation = validateTextQuality(extractedText);
+    
+    if (!validation.isValid) {
+      throw new Error(`PDF text extraction failed: ${validation.reason}. Quality score: ${validation.quality}%`);
+    }
+    
+    // Apply character limit
+    let finalText = extractedText;
+    if (finalText.length > MAX_CHARS) {
+      finalText = finalText.slice(0, MAX_CHARS) + '\n\n[Content truncated at 50k character limit]';
+    }
+    
+    console.log(`✅ Text extracted and validated: ${finalText.length} chars (quality: ${validation.quality}%)`);
+    
+    return { text: finalText, quality: validation.quality, method: 'enhanced-pdf-parsing' };
+  } catch (error) {
+    console.error("❌ Enhanced extraction failed:", error.message);
+    throw error;
   }
-  
-  // Apply character limit
-  if (extractedText.length > MAX_CHARS) {
-    extractedText = extractedText.slice(0, MAX_CHARS) + '\n\n[Content truncated at 100k character limit]'
-    console.log(`📏 Text truncated to ${MAX_CHARS} characters`)
-  }
-  
-  return { text: extractedText, method }
 }
 
 // Helper function to chunk text for AI processing
@@ -199,19 +277,14 @@ serve(async (req) => {
       const pdfBuffer = await fileData.arrayBuffer();
       console.log(`PDF downloaded via storage API: ${pdfBuffer.byteLength} bytes`)
       
-      // Extract text using ASCII method
-      const { text: extractedText, method } = await extractTextFromPDF(pdfBuffer)
+      // Extract and validate text using enhanced method
+      const { text: extractedText, quality, method } = await extractAndValidateText(pdfBuffer);
       
-      // Validate extracted text
-      if (!extractedText || extractedText.trim().length === 0) {
-        throw new Error('No readable text content found in PDF')
-      }
+      console.log(`Final extracted text: ${extractedText.length} characters using ${method} (quality: ${quality}%)`);
 
-      console.log(`Final extracted text: ${extractedText.length} characters using ${method}`)
-
-      // Implement smart chunking for AI context (6000 tokens with 500 overlap)
-      const chunks = chunkText(extractedText, 6000, 500)
-      console.log(`Text chunked into ${chunks.length} segments`)
+      // Implement smart chunking for AI context (12000 tokens with 500 overlap)
+      const chunks = chunkText(extractedText, 12000, 500);
+      console.log(`Text chunked into ${chunks.length} segments`);
 
       // Update document with extracted text
       const { error: updateError } = await supabaseClient
@@ -235,6 +308,7 @@ serve(async (req) => {
           message: `PDF text extracted successfully using ${method}`,
           textLength: extractedText.length,
           chunks: chunks.length,
+          quality: quality,
           method: method
         }),
         {
