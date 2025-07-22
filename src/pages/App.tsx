@@ -33,7 +33,8 @@ const App = () => {
     getUserDocuments, 
     sendMessage, 
     getThreadMessages,
-    subscribeToDocumentChanges 
+    subscribeToDocumentChanges,
+    deleteDocument 
   } = useSupabase();
 
   // Load user documents on mount and subscribe to changes
@@ -58,7 +59,7 @@ const App = () => {
     
     // Subscribe to document status changes for real-time updates
     const unsubscribe = subscribeToDocumentChanges((updatedDoc) => {
-      console.log('📄 Document status update:', updatedDoc);
+      // Document status update received
       
       setUploadedDocuments(prev => 
         prev.map(doc => doc.id === updatedDoc.id ? updatedDoc : doc)
@@ -90,7 +91,7 @@ const App = () => {
   }, []); // Remove dependencies that cause infinite loops
 
   const handleFileUpload = async (files: File[]) => {
-    console.log('▶️ handleFileUpload called with files:', files.map(f => ({ name: f.name, size: f.size, type: f.type })));
+    // Handle file upload
     if (files.length === 0) return;
     
     setIsUploading(true);
@@ -113,7 +114,7 @@ const App = () => {
       
       setUploadProgress(100);
     } catch (error) {
-      console.error('Upload failed:', error);
+      // Upload failed
       const errorMessage: Message = {
         id: Date.now().toString(),
         content: `Sorry, there was an error uploading your file: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -128,7 +129,7 @@ const App = () => {
   };
 
   const handleSendMessage = async (content: string) => {
-    console.log('🎯 App.handleSendMessage called with:', content);
+    // Handle send message
     
     // Add user message immediately
     const userMessage: Message = {
@@ -216,17 +217,52 @@ const App = () => {
     await supabase.auth.signOut();
   };
 
+  const handleDeleteDocument = async (documentId: string) => {
+    if (!window.confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const success = await deleteDocument(documentId);
+      if (success) {
+        // Remove from local state
+        setUploadedDocuments(prev => prev.filter(doc => doc.id !== documentId));
+        
+        // Add success message
+        const deleteMessage: Message = {
+          id: Date.now().toString(),
+          content: '🗑️ Document deleted successfully.',
+          role: 'assistant',
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, deleteMessage]);
+      } else {
+        throw new Error('Failed to delete document');
+      }
+    } catch (error) {
+      // Delete document error
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        content: `❌ Failed to delete document: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        role: 'assistant',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    }
+  };
+
   const AppContent = () => (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20">
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-background via-background to-muted/20">
       {/* Header */}
-      <header className="border-b border-border/50 bg-card/50 backdrop-blur-sm">
+      <header className="flex-shrink-0 border-b border-border/50 bg-card/50 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <Link to="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
               <ArrowLeft className="w-4 h-4" />
-              Back to Home
+              <span className="hidden sm:inline">Back to Home</span>
+              <span className="sm:hidden">Back</span>
             </Link>
-            <h1 className="text-xl font-semibold text-foreground">OM Intel Chat</h1>
+            <h1 className="text-lg sm:text-xl font-semibold text-foreground">OM Intel Chat</h1>
             <Button 
               variant="ghost" 
               size="sm" 
@@ -234,51 +270,52 @@ const App = () => {
               className="flex items-center gap-2"
             >
               <LogOut className="w-4 h-4" />
-              Sign Out
+              <span className="hidden sm:inline">Sign Out</span>
             </Button>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <div className="h-[calc(100vh-73px)] max-w-7xl mx-auto p-4">
-        <div className="h-full flex flex-col md:flex-row gap-6">
-          {/* Left Column - File Upload */}
-          <div className="w-full md:w-[30%] md:min-w-[350px]">
-            <FileUploadZone
-              onFileUpload={handleFileUpload}
-              uploadedFiles={uploadedDocuments.map(doc => ({
-                id: doc.id,
-                name: doc.name,
-                size: doc.size,
-                type: doc.type,
-                status: doc.status,
-                error_message: doc.error_message,
-              }))}
-              isUploading={isUploading}
-              uploadProgress={uploadProgress}
-            />
-          </div>
+      {/* Main Content - flexible height */}
+      <main className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 max-w-7xl mx-auto w-full p-2 sm:p-4 flex flex-col min-h-0">
+          <div className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-6 min-h-0">
+            {/* Left Column - File Upload */}
+            <aside className="w-full lg:w-[400px] xl:w-[450px] flex-shrink-0 overflow-y-auto">
+              <FileUploadZone
+                onFileUpload={handleFileUpload}
+                onFileDelete={handleDeleteDocument}
+                uploadedFiles={uploadedDocuments.map(doc => ({
+                  id: doc.id,
+                  name: doc.name,
+                  size: doc.size,
+                  type: doc.type,
+                  status: doc.status,
+                  error_message: doc.error_message,
+                }))}
+                isUploading={isUploading}
+                uploadProgress={uploadProgress}
+              />
+            </aside>
 
-          {/* Right Column - Chat Interface */}
-          <div className="flex-1 flex flex-col bg-card/30 backdrop-blur-sm rounded-lg border border-border/50 shadow-lg overflow-hidden">
-            <ChatMessages
-              messages={messages}
-              isStreaming={isStreaming}
-            />
-            
-            <ChatInput
-              onSendMessage={handleSendMessage}
-              onStopGeneration={handleStopGeneration}
-              isStreaming={isStreaming}
-              disabled={isUploading}
-              hasUploadedFiles={uploadedDocuments.length > 0}
-            />
+            {/* Right Column - Chat Interface */}
+            <div className="flex-1 flex flex-col bg-card/30 backdrop-blur-sm rounded-lg border border-border/50 shadow-lg min-h-0 overflow-hidden">
+              <ChatMessages
+                messages={messages}
+                isStreaming={isStreaming}
+              />
+              
+              <ChatInput
+                onSendMessage={handleSendMessage}
+                onStopGeneration={handleStopGeneration}
+                isStreaming={isStreaming}
+                disabled={isUploading}
+                hasUploadedFiles={uploadedDocuments.length > 0}
+              />
+            </div>
           </div>
         </div>
-      </div>
-
-      {/* Mobile responsive handled by Tailwind classes */}
+      </main>
     </div>
   );
 

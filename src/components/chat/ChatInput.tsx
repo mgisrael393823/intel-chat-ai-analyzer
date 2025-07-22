@@ -22,24 +22,39 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const maxLength = 2000;
 
+  // Use ResizeObserver for more stable height adjustments
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      const scrollHeight = textareaRef.current.scrollHeight;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    
+    const adjustHeight = () => {
+      textarea.style.height = 'auto';
+      const scrollHeight = textarea.scrollHeight;
       const maxHeight = 5 * 24; // 5 lines * approximate line height
-      textareaRef.current.style.height = Math.min(scrollHeight, maxHeight) + 'px';
-    }
+      textarea.style.height = Math.min(scrollHeight, maxHeight) + 'px';
+    };
+    
+    // Initial adjustment
+    adjustHeight();
+    
+    // Create ResizeObserver for smooth resizing
+    const resizeObserver = new ResizeObserver(adjustHeight);
+    resizeObserver.observe(textarea);
+    
+    return () => {
+      resizeObserver.disconnect();
+    };
   }, [message]);
 
   const handleSubmit = (e: React.FormEvent) => {
-    console.log('📝 ChatInput.handleSubmit called with:', { message: message.trim(), disabled, isStreaming });
     e.preventDefault();
     if (message.trim() && !disabled) {
-      console.log('📤 Calling onSendMessage with:', message.trim());
       onSendMessage(message.trim());
       setMessage('');
-    } else {
-      console.log('❌ Message send blocked:', { hasMessage: !!message.trim(), disabled, isStreaming });
+      // Keep focus on textarea after sending
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 0);
     }
   };
 
@@ -55,8 +70,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   return (
-    <div className="border-t border-border/50 bg-card/50 backdrop-blur-sm p-4">
-      <form onSubmit={handleSubmit} className="space-y-3">
+    <div className="flex-shrink-0 border-t border-border/50 bg-card/50 backdrop-blur-sm p-2 sm:p-4">
+      <form onSubmit={handleSubmit} className="space-y-2 sm:space-y-3">
         <div className="relative">
           <Textarea
             ref={textareaRef}

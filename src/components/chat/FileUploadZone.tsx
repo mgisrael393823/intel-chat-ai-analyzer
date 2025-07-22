@@ -17,6 +17,7 @@ interface UploadedFile {
 
 interface FileUploadZoneProps {
   onFileUpload: (files: File[]) => void;
+  onFileDelete?: (fileId: string) => void;
   uploadedFiles: UploadedFile[];
   isUploading: boolean;
   uploadProgress: number;
@@ -24,6 +25,7 @@ interface FileUploadZoneProps {
 
 export const FileUploadZone: React.FC<FileUploadZoneProps> = memo(({
   onFileUpload,
+  onFileDelete,
   uploadedFiles,
   isUploading,
   uploadProgress
@@ -64,7 +66,7 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = memo(({
     
     if (pdfFiles.length !== files.length) {
       // Show error for non-PDF files
-      console.warn('Only PDF files are allowed');
+      // Only PDF files are allowed
     }
     
     if (pdfFiles.length > 0) {
@@ -79,20 +81,20 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = memo(({
   };
 
   const removeFile = (fileId: string) => {
-    // For now, just log - file deletion should be handled through the parent component
-    console.log('Remove file:', fileId);
-    // TODO: Implement file deletion through parent component callback
+    if (onFileDelete) {
+      onFileDelete(fileId);
+    }
   };
 
   const handleGenerateSnapshot = async (fileId: string) => {
     setGeneratingSnapshot(fileId);
     try {
       const result = await generateSnapshot(fileId);
-      console.log('Snapshot generated:', result);
+      // Snapshot generated successfully
       // TODO: Display snapshot in UI or open modal
       alert(`Snapshot generated for ${result.documentName}!\n\nProperty: ${result.snapshot.propertyName}\nPrice: $${result.snapshot.askingPrice?.toLocaleString() || 'N/A'}\nCap Rate: ${result.snapshot.capRate || 'N/A'}%`);
     } catch (error) {
-      console.error('Failed to generate snapshot:', error);
+      // Failed to generate snapshot
       alert(`Failed to generate snapshot: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setGeneratingSnapshot(null);

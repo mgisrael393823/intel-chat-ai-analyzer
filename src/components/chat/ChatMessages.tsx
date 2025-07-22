@@ -19,33 +19,39 @@ export const ChatMessages: React.FC<ChatMessagesProps> = React.memo(({ messages,
     if (scrollAreaRef.current) {
       const scrollElement = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
       if (scrollElement) {
-        const isNearBottom = scrollElement.scrollTop > lastScrollTop || 
-                            scrollElement.scrollTop >= scrollElement.scrollHeight - scrollElement.clientHeight - 100;
-        
-        if (isNearBottom) {
-          scrollElement.scrollTo({
-            top: scrollElement.scrollHeight,
-            behavior: 'smooth'
-          });
-          setShowNewMessageDivider(false);
-        } else {
-          setShowNewMessageDivider(true);
-        }
+        // Always scroll to bottom for new messages
+        scrollElement.scrollTo({
+          top: scrollElement.scrollHeight,
+          behavior: 'smooth'
+        });
       }
     }
-  }, [messages]); // Remove lastScrollTop to prevent loops
+  }, [messages.length]); // Only depend on message count
 
-  const handleScroll = useMemo(
-    () => debounce((e: React.UIEvent<HTMLDivElement>) => {
-      const target = e.target as HTMLDivElement;
-      const scrollTop = target.scrollTop;
+  // Set up scroll listener on the viewport
+  useEffect(() => {
+    if (!scrollAreaRef.current) return;
+    
+    const scrollElement = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
+    if (!scrollElement) return;
+    
+    const handleScroll = debounce(() => {
+      const scrollTop = scrollElement.scrollTop;
+      const scrollHeight = scrollElement.scrollHeight;
+      const clientHeight = scrollElement.clientHeight;
+      
       setLastScrollTop(scrollTop);
       
-      const isAtBottom = scrollTop >= target.scrollHeight - target.clientHeight - 10;
+      const isAtBottom = scrollTop >= scrollHeight - clientHeight - 10;
       setShowNewMessageDivider(!isAtBottom && messages.length > 0);
-    }, 100),
-    [messages.length]
-  );
+    }, 100);
+    
+    scrollElement.addEventListener('scroll', handleScroll);
+    return () => {
+      scrollElement.removeEventListener('scroll', handleScroll);
+      handleScroll.cancel();
+    };
+  }, [messages.length]);
 
   const scrollToBottom = () => {
     if (scrollAreaRef.current) {
@@ -79,9 +85,9 @@ export const ChatMessages: React.FC<ChatMessagesProps> = React.memo(({ messages,
   }
 
   return (
-    <div className="flex-1 relative">
-      <ScrollArea ref={scrollAreaRef} className="h-full">
-        <div className="p-4 space-y-1" onScroll={handleScroll}>
+    <div className="flex-1 relative min-h-0">
+      <ScrollArea ref={scrollAreaRef} className="h-full w-full">
+        <div className="p-4 space-y-1">
           {messages.map((message, index) => (
             <div key={message.id}>
               <ChatMessage 
