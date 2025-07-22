@@ -137,53 +137,82 @@ serve(async (req) => {
 
 Always be thorough, professional, and focused on helping users make informed investment decisions.`;
     
-    // Get document context with enhanced processing
+    // Get document context with validation
     if (documentId) {
       const { data: document } = await supabaseAdmin
         .from('documents')
-        .select('name, extracted_text, type, size')
+        .select('name, extracted_text, type, size, status, error_message')
         .eq('id', documentId)
         .single();
 
-      if (document?.extracted_text) {
-        const maxContextLength = 15000; // Increased context window
-        let documentContext = document.extracted_text;
-        
-        console.log(`Document context available: ${documentContext.length} characters`);
-        
-        if (documentContext.length > maxContextLength) {
-          // Intelligent truncation - prioritize financial sections
-          const sections = documentContext.split(/\n\s*\n/);
-          let truncatedContext = '';
-          let prioritySections = '';
+      if (document) {
+        if (document.status === 'error') {
+          systemPrompt += `\n\n**DOCUMENT ERROR:**
+Document "${document.name}" failed to process. Error: ${document.error_message || 'Unknown error'}
+Please inform the user that the document needs to be re-uploaded or re-processed.`;
+        } else if (document.status === 'processing') {
+          systemPrompt += `\n\n**DOCUMENT PROCESSING:**
+Document "${document.name}" is still being processed. Please inform the user to wait for processing to complete before asking detailed questions.`;
+        } else if (document.extracted_text && document.status === 'ready') {
+          // Validate that extracted text is actually readable (not binary data)
+          const textSample = document.extracted_text.substring(0, 200);
+          const isBinaryData = textSample.includes('<<') && textSample.includes('>>') && textSample.includes('/');
+          const hasReadableText = /[a-zA-Z]{10,}/.test(textSample);
           
-          // Look for financial keywords first
-          const financialKeywords = /(?:noi|net operating income|cap rate|cash flow|rent roll|financial|income|expenses|returns?|irr)/i;
-          
-          for (const section of sections) {
-            if (financialKeywords.test(section)) {
-              if (prioritySections.length + section.length < maxContextLength * 0.7) {
-                prioritySections += section + '\n\n';
+          if (isBinaryData && !hasReadableText) {
+            console.log('Detected binary data in extracted_text, marking for re-processing');
+            
+            // Mark document for re-processing
+            await supabaseAdmin
+              .from('documents')
+              .update({ 
+                status: 'error',
+                error_message: 'Binary data detected - needs re-processing'
+              })
+              .eq('id', documentId);
+              
+            systemPrompt += `\n\n**DOCUMENT RE-PROCESSING NEEDED:**
+Document "${document.name}" contains binary data instead of readable text and needs to be re-processed. Please inform the user that there was an issue with text extraction and they should try re-uploading the document.`;
+          } else {
+            // Use extracted text if it's valid
+            const maxContextLength = 20000; // Increased context window
+            let documentContext = document.extracted_text;
+            
+            console.log(`Document context available: ${documentContext.length} characters`);
+            
+            if (documentContext.length > maxContextLength) {
+              // Intelligent truncation - prioritize financial sections
+              const sections = documentContext.split(/\n\s*\n/);
+              let truncatedContext = '';
+              let prioritySections = '';
+              
+              // Look for financial keywords first
+              const financialKeywords = /(?:noi|net operating income|cap rate|cash flow|rent roll|financial|income|expenses|returns?|irr|investment|property|lease|tenant)/i;
+              
+              for (const section of sections) {
+                if (financialKeywords.test(section)) {
+                  if (prioritySections.length + section.length < maxContextLength * 0.7) {
+                    prioritySections += section + '\n\n';
+                  }
+                }
               }
+              
+              // Fill remaining space with other content
+              const remainingSpace = maxContextLength - prioritySections.length;
+              for (const section of sections) {
+                if (!financialKeywords.test(section) && truncatedContext.length + section.length < remainingSpace) {
+                  truncatedContext += section + '\n\n';
+                }
+              }
+              
+              documentContext = prioritySections + truncatedContext;
             }
-          }
-          
-          // Fill remaining space with other content
-          const remainingSpace = maxContextLength - prioritySections.length;
-          for (const section of sections) {
-            if (!financialKeywords.test(section) && truncatedContext.length + section.length < remainingSpace) {
-              truncatedContext += section + '\n\n';
-            }
-          }
-          
-          documentContext = prioritySections + truncatedContext;
-        }
 
-        systemPrompt += `\n\n**CURRENT DOCUMENT ANALYSIS:**
+            systemPrompt += `\n\n**CURRENT DOCUMENT ANALYSIS:**
 Document: "${document.name}"
 Type: ${document.type || 'PDF'}
 Size: ${Math.round((document.size || 0) / 1024)} KB
-Content Preview: "${documentContext.substring(0, 200)}..."
+Status: ${document.status}
 
 **FULL DOCUMENT CONTENT:**
 ${documentContext}
@@ -194,19 +223,21 @@ ${documentContext}
 - Reference specific numbers, percentages, and data points from the document in your responses
 - If the user asks general questions, relate them back to this specific property/deal when relevant
 - Focus on practical investment insights and actionable recommendations`;
-        
-        console.log(`Enhanced document context prepared: ${documentContext.length} characters`);
-      } else {
-        console.log('No extracted text found for document');
-        systemPrompt += `\n\nNote: Document "${document?.name || 'Unknown'}" is available but text extraction may still be in progress or failed. If the user asks about the document, let them know the content is not yet accessible for analysis.`;
+            
+            console.log(`Enhanced document context prepared: ${documentContext.length} characters`);
+          }
+        } else {
+          console.log('No extracted text found for document');
+          systemPrompt += `\n\nNote: Document "${document?.name || 'Unknown'}" is available but text extraction may still be in progress or failed. If the user asks about the document, let them know the content is not yet accessible for analysis.`;
+        }
       }
     }
 
-    // Enhanced OpenAI API call with better model and settings
+    // Enhanced OpenAI API call
     let openaiResponse;
     
     try {
-      // Try with GPT-4o (more capable model)
+      // Use GPT-4o for better document analysis
       openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -214,44 +245,21 @@ ${documentContext}
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-4o', // Upgraded from gpt-4o-mini
+          model: 'gpt-4o',
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: message }
           ],
-          temperature: 0.2, // Lower for more consistent analysis
+          temperature: 0.1, // Lower for more consistent analysis
           stream: true,
-          max_tokens: 3000, // Increased for detailed responses
+          max_tokens: 3000,
         }),
       });
 
       if (!openaiResponse.ok) {
-        console.log('Primary model failed, trying fallback...');
-        
-        // Fallback to gpt-4o-mini if primary fails
-        openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${openaiApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: message }
-            ],
-            temperature: 0.2,
-            stream: true,
-            max_tokens: 2000,
-          }),
-        });
-        
-        if (!openaiResponse.ok) {
-          const errorText = await openaiResponse.text();
-          console.error('Both OpenAI models failed:', errorText);
-          throw new Error('Failed to get AI response from both primary and fallback models');
-        }
+        const errorText = await openaiResponse.text();
+        console.error('OpenAI API error:', errorText);
+        throw new Error('Failed to get AI response');
       }
     } catch (error) {
       console.error('OpenAI API error:', error);
@@ -376,7 +384,7 @@ ${documentContext}
     return new Response(
       JSON.stringify({
         error: error.message || 'Internal server error',
-        details: 'Enhanced chat system with improved document analysis'
+        details: 'Enhanced chat system with document validation'
       }),
       { 
         status: 500, 

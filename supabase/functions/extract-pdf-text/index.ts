@@ -12,207 +12,136 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 }
 
-// Enhanced PDF text extraction using multiple methods
+// Enhanced PDF text extraction using pdf-parse library
 async function extractTextFromPDF(pdfBuffer: Uint8Array): Promise<string> {
-  console.log("Starting PDF text extraction with enhanced method");
+  console.log("Starting PDF text extraction with pdf-parse library");
   
   try {
-    // Convert buffer to string for text extraction
-    const pdfString = new TextDecoder('latin1').decode(pdfBuffer);
+    // Import pdf-parse dynamically
+    const pdfParse = (await import('https://esm.sh/pdf-parse@1.1.1')).default;
     
-    // Enhanced extraction patterns for PDF text objects
-    const patterns = [
-      // Standard PDF text objects with various operators
-      /\(([^)]{3,})\)\s*Tj/g,
-      /\(([^)]{3,})\)\s*TJ/g,
-      /\[\(([^)]{3,})\)\]\s*TJ/g,
-      // Text between BT and ET operators (text blocks)
-      /BT\s+[^(]*\(([^)]{3,})\)[^E]*ET/gs,
-      // Font and text combinations
-      /\/F\d+\s+\d+\s+Tf[^(]*\(([^)]{3,})\)/g,
-      // Multi-line text patterns
-      /Td\s*\(([^)]{5,})\)\s*Tj/g,
-      // Text with positioning
-      /\d+\s+\d+\s+Td\s*\(([^)]{3,})\)/g,
-    ];
+    console.log(`Processing PDF buffer of ${pdfBuffer.length} bytes`);
     
-    const extractedTexts = new Set<string>();
-    let totalMatches = 0;
+    // Use pdf-parse to extract text
+    const pdfData = await pdfParse(pdfBuffer);
     
-    // Apply each pattern to extract text
-    for (const pattern of patterns) {
-      let match;
-      while ((match = pattern.exec(pdfString)) !== null && totalMatches < 10000) {
-        const text = match[1];
-        if (text && text.length > 2) {
-          // Clean up the extracted text
-          const cleanText = text
-            .replace(/\\n/g, '\n')
-            .replace(/\\r/g, '\r')
-            .replace(/\\t/g, '\t')
-            .replace(/\\\\/g, '\\')
-            .replace(/\\'/g, "'")
-            .replace(/\\"/g, '"')
-            .replace(/\\(\d{3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8)))
-            .trim();
-          
-          if (cleanText.length > 2 && /[a-zA-Z]/.test(cleanText)) {
-            extractedTexts.add(cleanText);
-            totalMatches++;
-          }
-        }
-      }
-      // Reset regex lastIndex for next iteration
-      pattern.lastIndex = 0;
+    console.log(`PDF parsed successfully - Pages: ${pdfData.numpages}, Text length: ${pdfData.text.length}`);
+    
+    let extractedText = pdfData.text;
+    
+    // Clean up the extracted text
+    extractedText = extractedText
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .replace(/\n\s*\n\s*\n/g, '\n\n') // Remove excessive line breaks
+      .trim();
+    
+    if (extractedText.length < 100) {
+      throw new Error(`Extracted text too short: ${extractedText.length} characters`);
     }
     
-    console.log(`Extracted ${extractedTexts.size} unique text segments from ${totalMatches} matches`);
+    console.log(`✅ Text extraction successful: ${extractedText.length} characters`);
+    console.log(`Preview: ${extractedText.substring(0, 200)}...`);
     
-    // Convert set to array and join
-    const extractedArray = Array.from(extractedTexts);
-    
-    // If we got substantial structured text, use it
-    if (extractedArray.length > 20) {
-      const result = extractedArray.join('\n');
-      console.log(`Using structured extraction: ${result.length} characters`);
-      return result.substring(0, 100000); // Increased limit
-    }
-    
-    // Fallback: extract readable lines from the PDF stream
-    console.log("Falling back to line-based extraction");
-    const lines = pdfString.split(/[\r\n]+/);
-    const readableLines: string[] = [];
-    
-    for (const line of lines) {
-      // Look for lines with substantial readable content
-      const cleanLine = line
-        .replace(/[^\x20-\x7E]/g, ' ') // Replace non-printable with spaces
-        .replace(/\s+/g, ' ') // Normalize spaces
-        .trim();
-      
-      // Include lines that have substantial text content
-      if (cleanLine.length > 15 && 
-          cleanLine.match(/[a-zA-Z]{3,}/) && 
-          (cleanLine.includes(' ') || cleanLine.length > 30)) {
-        readableLines.push(cleanLine);
-      }
-    }
-    
-    const fallbackResult = readableLines.slice(0, 2000).join('\n');
-    console.log(`Fallback extraction: ${fallbackResult.length} characters from ${readableLines.length} lines`);
-    
-    return fallbackResult.substring(0, 100000);
+    return extractedText;
     
   } catch (error) {
-    console.error('PDF parsing error:', error);
-    throw new Error(`Failed to parse PDF content: ${error.message}`);
+    console.error('PDF parsing with pdf-parse failed:', error);
+    
+    // Fallback to simple text extraction
+    console.log("Attempting fallback text extraction...");
+    return await fallbackTextExtraction(pdfBuffer);
   }
 }
 
-// Enhanced text quality validation with more lenient thresholds
+// Fallback text extraction method
+async function fallbackTextExtraction(pdfBuffer: Uint8Array): Promise<string> {
+  console.log("Using fallback text extraction method");
+  
+  try {
+    const pdfString = new TextDecoder('latin1').decode(pdfBuffer);
+    
+    // Look for text objects in PDF
+    const textMatches = [];
+    const patterns = [
+      /\(([^)]{10,})\)\s*Tj/g,
+      /\(([^)]{10,})\)\s*TJ/g,
+      /BT\s+[^(]*\(([^)]{10,})\)[^E]*ET/gs,
+    ];
+    
+    for (const pattern of patterns) {
+      let match;
+      while ((match = pattern.exec(pdfString)) !== null && textMatches.length < 1000) {
+        const text = match[1]
+          .replace(/\\n/g, '\n')
+          .replace(/\\r/g, '\r')
+          .replace(/\\t/g, '\t')
+          .replace(/\\\\/g, '\\')
+          .trim();
+        
+        if (text.length > 5 && /[a-zA-Z]/.test(text)) {
+          textMatches.push(text);
+        }
+      }
+      pattern.lastIndex = 0;
+    }
+    
+    if (textMatches.length === 0) {
+      throw new Error('No readable text found in PDF');
+    }
+    
+    const extractedText = textMatches.join('\n').substring(0, 100000);
+    console.log(`Fallback extraction: ${extractedText.length} characters from ${textMatches.length} text objects`);
+    
+    return extractedText;
+    
+  } catch (error) {
+    console.error('Fallback extraction failed:', error);
+    throw new Error(`All PDF extraction methods failed: ${error.message}`);
+  }
+}
+
+// Validate extracted text quality
 function validateTextQuality(text: string): { isValid: boolean; quality: number; reason?: string } {
   if (!text || text.length < 50) {
     return { isValid: false, quality: 0, reason: 'Text too short' };
   }
   
-  // Count various text quality metrics
   const totalChars = text.length;
   const letters = text.match(/[a-zA-Z]/g)?.length || 0;
   const words = text.match(/\b[a-zA-Z]{2,}\b/g)?.length || 0;
   const sentences = text.match(/[.!?]+/g)?.length || 0;
-  const numbers = text.match(/\d/g)?.length || 0;
   
-  // Calculate quality score
   const letterRatio = letters / totalChars;
-  const wordDensity = words / (totalChars / 100); // words per 100 chars
-  const hasStructure = sentences > 0 && words > sentences * 3;
+  const wordDensity = words / (totalChars / 100);
+  const hasStructure = sentences > 0 && words > sentences * 2;
   
   let quality = 0;
-  quality += letterRatio * 40; // Up to 40 points for letter content
-  quality += Math.min(wordDensity * 2, 30); // Up to 30 points for word density
-  quality += hasStructure ? 20 : 0; // 20 points for sentence structure
-  quality += Math.min((numbers / totalChars) * 100, 10); // Up to 10 points for numbers
+  quality += letterRatio * 40;
+  quality += Math.min(wordDensity * 2, 30);
+  quality += hasStructure ? 20 : 0;
+  quality += Math.min((text.match(/\d/g)?.length || 0) / totalChars * 100, 10);
   
   quality = Math.round(quality);
   
-  // More lenient validation - lowered from 60% to 40%
-  if (letterRatio < 0.3) {
+  // Lowered threshold to 30% to allow more documents through
+  if (letterRatio < 0.25) {
     return { isValid: false, quality, reason: 'Too few alphabetic characters' };
   }
   
-  if (words < 20) {
+  if (words < 15) {
     return { isValid: false, quality, reason: 'Too few words detected' };
   }
   
-  if (quality < 40) {
+  if (quality < 30) {
     return { isValid: false, quality, reason: 'Overall quality score too low' };
   }
   
   return { isValid: true, quality };
 }
 
-// Extract and validate text with enhanced error handling
-async function extractAndValidateText(buffer: ArrayBuffer): Promise<{ text: string, quality: number, method: string }> {
-  const MAX_CHARS = 100000; // Increased from 50k
-  
-  try {
-    console.log(`Processing PDF buffer of ${buffer.byteLength} bytes`);
-    
-    const pdfBuffer = new Uint8Array(buffer);
-    const extractedText = await extractTextFromPDF(pdfBuffer);
-    
-    console.log(`Raw extraction completed: ${extractedText.length} characters`);
-    
-    // Validate text quality with more lenient thresholds
-    const validation = validateTextQuality(extractedText);
-    console.log(`Text validation - Quality: ${validation.quality}%, Valid: ${validation.isValid}`);
-    
-    if (!validation.isValid) {
-      // Log first 500 chars for debugging
-      console.log('Sample of extracted text:', extractedText.substring(0, 500));
-      throw new Error(`PDF text extraction validation failed: ${validation.reason}. Quality score: ${validation.quality}%`);
-    }
-    
-    // Apply character limit
-    let finalText = extractedText;
-    if (finalText.length > MAX_CHARS) {
-      finalText = finalText.slice(0, MAX_CHARS) + '\n\n[Content truncated at 100k character limit]';
-    }
-    
-    console.log(`✅ Text extracted and validated: ${finalText.length} chars (quality: ${validation.quality}%)`);
-    
-    return { 
-      text: finalText, 
-      quality: validation.quality, 
-      method: 'enhanced-pdf-parsing-v2' 
-    };
-  } catch (error) {
-    console.error("❌ Enhanced extraction failed:", error.message);
-    throw error;
-  }
-}
-
-// Helper function to chunk text for AI processing
-function chunkText(text: string, maxTokens: number, overlap: number): string[] {
-  const words = text.split(' ')
-  const chunks: string[] = []
-  const wordsPerChunk = Math.floor(maxTokens * 0.75) // Rough estimation: 4 chars per token
-  const overlapWords = Math.floor(overlap * 0.75)
-
-  for (let i = 0; i < words.length; i += wordsPerChunk - overlapWords) {
-    const chunk = words.slice(i, i + wordsPerChunk).join(' ')
-    if (chunk.trim()) {
-      chunks.push(chunk)
-    }
-  }
-
-  return chunks
-}
-
 serve(async (req) => {
   console.log("🚀 PDF Extraction request received");
   
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     console.log("📋 CORS preflight request");
     return new Response(null, { 
@@ -224,7 +153,6 @@ serve(async (req) => {
   try {
     console.log('=== PDF Extraction Request Started ===')
     
-    // Parse request body
     let requestBody;
     try {
       requestBody = await req.json()
@@ -249,8 +177,8 @@ serve(async (req) => {
         JSON.stringify({
           status: 'healthy',
           timestamp: new Date().toISOString(),
-          extractionMethod: 'enhanced-pdf-parsing-v2',
-          description: "PDF extraction service is running with enhanced parsing"
+          extractionMethod: 'pdf-parse-with-fallback',
+          description: "PDF extraction service is running with pdf-parse library"
         }),
         { 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -258,7 +186,6 @@ serve(async (req) => {
       )
     }
 
-    // Create Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
@@ -322,26 +249,37 @@ serve(async (req) => {
 
       // Convert to ArrayBuffer for processing
       const pdfBuffer = await fileData.arrayBuffer();
+      const pdfUint8Array = new Uint8Array(pdfBuffer);
       console.log(`PDF downloaded successfully: ${pdfBuffer.byteLength} bytes`)
       
-      // Extract and validate text using enhanced method
-      const { text: extractedText, quality, method } = await extractAndValidateText(pdfBuffer);
+      // Extract text using improved method
+      const extractedText = await extractTextFromPDF(pdfUint8Array);
       
-      console.log(`✅ Extraction complete: ${extractedText.length} characters using ${method} (quality: ${quality}%)`);
+      // Validate text quality
+      const validation = validateTextQuality(extractedText);
+      console.log(`Text validation - Quality: ${validation.quality}%, Valid: ${validation.isValid}`);
       
-      // Log first 200 characters for debugging
-      console.log('Text preview:', extractedText.substring(0, 200) + '...');
-
-      // Smart chunking for AI context
-      const chunks = chunkText(extractedText, 15000, 500); // Increased chunk size
-      console.log(`Text chunked into ${chunks.length} segments`);
+      if (!validation.isValid) {
+        console.log('Sample of extracted text:', extractedText.substring(0, 500));
+        throw new Error(`PDF text extraction validation failed: ${validation.reason}. Quality score: ${validation.quality}%`);
+      }
+      
+      // Apply character limit
+      const MAX_CHARS = 100000;
+      let finalText = extractedText;
+      if (finalText.length > MAX_CHARS) {
+        finalText = finalText.slice(0, MAX_CHARS) + '\n\n[Content truncated at 100k character limit]';
+      }
+      
+      console.log(`✅ Text extracted and validated: ${finalText.length} chars (quality: ${validation.quality}%)`);
 
       // Update document with extracted text
       const { error: updateError } = await supabaseClient
         .from('documents')
         .update({
-          extracted_text: extractedText,
-          status: 'ready'
+          extracted_text: finalText,
+          status: 'ready',
+          error_message: null // Clear any previous errors
         })
         .eq('id', documentId)
 
@@ -355,12 +293,11 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({
           success: true,
-          message: `PDF text extracted successfully using ${method}`,
-          textLength: extractedText.length,
-          chunks: chunks.length,
-          quality: quality,
-          method: method,
-          preview: extractedText.substring(0, 200) + '...'
+          message: `PDF text extracted successfully using pdf-parse`,
+          textLength: finalText.length,
+          quality: validation.quality,
+          method: 'pdf-parse-with-fallback',
+          preview: finalText.substring(0, 200) + '...'
         }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
