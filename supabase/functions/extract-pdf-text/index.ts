@@ -1,3 +1,4 @@
+
 console.log("⚡️ PDF Extraction Function initializing…");
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -11,34 +12,39 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 }
 
-// Enhanced PDF text extraction function
-function extractTextFromPDF(pdfBuffer: Uint8Array): string {
+// Enhanced PDF text extraction using multiple methods
+async function extractTextFromPDF(pdfBuffer: Uint8Array): Promise<string> {
+  console.log("Starting PDF text extraction with enhanced method");
+  
   try {
-    // Convert buffer to string and look for text content
+    // Convert buffer to string for text extraction
     const pdfString = new TextDecoder('latin1').decode(pdfBuffer);
     
-    // Enhanced PDF text extraction patterns
+    // Enhanced extraction patterns for PDF text objects
     const patterns = [
-      // Standard PDF text objects: (text) Tj
-      /\(([^)]+)\)\s*Tj/g,
-      // Array text objects: [(text)] TJ
-      /\[\(([^)]+)\)\]\s*TJ/g,
-      // Text within parentheses
-      /\(([^)]+)\)/g,
-      // Text between BT and ET operators
-      /BT\s+.*?\s+\(([^)]+)\)\s*.*?ET/gs,
-      // Simple text extraction for headers/titles
-      /\/F\d+\s+\d+\s+Tf[^(]*\(([^)]+)\)/g,
+      // Standard PDF text objects with various operators
+      /\(([^)]{3,})\)\s*Tj/g,
+      /\(([^)]{3,})\)\s*TJ/g,
+      /\[\(([^)]{3,})\)\]\s*TJ/g,
+      // Text between BT and ET operators (text blocks)
+      /BT\s+[^(]*\(([^)]{3,})\)[^E]*ET/gs,
+      // Font and text combinations
+      /\/F\d+\s+\d+\s+Tf[^(]*\(([^)]{3,})\)/g,
+      // Multi-line text patterns
+      /Td\s*\(([^)]{5,})\)\s*Tj/g,
+      // Text with positioning
+      /\d+\s+\d+\s+Td\s*\(([^)]{3,})\)/g,
     ];
     
-    const extractedLines: string[] = [];
+    const extractedTexts = new Set<string>();
+    let totalMatches = 0;
     
     // Apply each pattern to extract text
     for (const pattern of patterns) {
       let match;
-      while ((match = pattern.exec(pdfString)) !== null) {
+      while ((match = pattern.exec(pdfString)) !== null && totalMatches < 10000) {
         const text = match[1];
-        if (text && text.length > 1) {
+        if (text && text.length > 2) {
           // Clean up the extracted text
           const cleanText = text
             .replace(/\\n/g, '\n')
@@ -47,97 +53,139 @@ function extractTextFromPDF(pdfBuffer: Uint8Array): string {
             .replace(/\\\\/g, '\\')
             .replace(/\\'/g, "'")
             .replace(/\\"/g, '"')
+            .replace(/\\(\d{3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8)))
             .trim();
           
-          if (cleanText.length > 2 && !extractedLines.includes(cleanText)) {
-            extractedLines.push(cleanText);
+          if (cleanText.length > 2 && /[a-zA-Z]/.test(cleanText)) {
+            extractedTexts.add(cleanText);
+            totalMatches++;
           }
         }
       }
+      // Reset regex lastIndex for next iteration
+      pattern.lastIndex = 0;
     }
     
-    // If we found structured text, use it
-    if (extractedLines.length > 10) {
-      return extractedLines.join('\n').substring(0, 50000); // Limit size
+    console.log(`Extracted ${extractedTexts.size} unique text segments from ${totalMatches} matches`);
+    
+    // Convert set to array and join
+    const extractedArray = Array.from(extractedTexts);
+    
+    // If we got substantial structured text, use it
+    if (extractedArray.length > 20) {
+      const result = extractedArray.join('\n');
+      console.log(`Using structured extraction: ${result.length} characters`);
+      return result.substring(0, 100000); // Increased limit
     }
     
-    // Fallback: Look for readable ASCII content in the PDF
+    // Fallback: extract readable lines from the PDF stream
+    console.log("Falling back to line-based extraction");
     const lines = pdfString.split(/[\r\n]+/);
     const readableLines: string[] = [];
     
     for (const line of lines) {
-      // Filter for lines that contain readable text (letters, numbers, common punctuation)
-      const readable = line.match(/[a-zA-Z0-9\s.,;:!?\-$%()]+/g);
-      if (readable) {
-        const cleanLine = readable.join(' ').trim();
-        // Only include lines with substantial readable content
-        if (cleanLine.length > 10 && cleanLine.match(/[a-zA-Z]{3,}/)) {
-          readableLines.push(cleanLine);
-        }
+      // Look for lines with substantial readable content
+      const cleanLine = line
+        .replace(/[^\x20-\x7E]/g, ' ') // Replace non-printable with spaces
+        .replace(/\s+/g, ' ') // Normalize spaces
+        .trim();
+      
+      // Include lines that have substantial text content
+      if (cleanLine.length > 15 && 
+          cleanLine.match(/[a-zA-Z]{3,}/) && 
+          (cleanLine.includes(' ') || cleanLine.length > 30)) {
+        readableLines.push(cleanLine);
       }
     }
     
-    return readableLines.slice(0, 500).join('\n').substring(0, 50000);
+    const fallbackResult = readableLines.slice(0, 2000).join('\n');
+    console.log(`Fallback extraction: ${fallbackResult.length} characters from ${readableLines.length} lines`);
+    
+    return fallbackResult.substring(0, 100000);
     
   } catch (error) {
     console.error('PDF parsing error:', error);
-    throw new Error('Failed to parse PDF content');
+    throw new Error(`Failed to parse PDF content: ${error.message}`);
   }
 }
 
-// Validate extracted text quality
+// Enhanced text quality validation with more lenient thresholds
 function validateTextQuality(text: string): { isValid: boolean; quality: number; reason?: string } {
-  if (!text || text.length < 100) {
+  if (!text || text.length < 50) {
     return { isValid: false, quality: 0, reason: 'Text too short' };
   }
   
-  // Count readable characters vs total characters
-  const readableChars = text.match(/[a-zA-Z0-9\s.,;:!?\-$%()]/g)?.length || 0;
+  // Count various text quality metrics
   const totalChars = text.length;
-  const readabilityRatio = readableChars / totalChars;
-  
-  // Count words
+  const letters = text.match(/[a-zA-Z]/g)?.length || 0;
   const words = text.match(/\b[a-zA-Z]{2,}\b/g)?.length || 0;
+  const sentences = text.match(/[.!?]+/g)?.length || 0;
+  const numbers = text.match(/\d/g)?.length || 0;
   
   // Calculate quality score
-  const quality = Math.min(100, Math.round(readabilityRatio * 70 + (words / text.length) * 300));
+  const letterRatio = letters / totalChars;
+  const wordDensity = words / (totalChars / 100); // words per 100 chars
+  const hasStructure = sentences > 0 && words > sentences * 3;
   
-  if (readabilityRatio < 0.6) {
-    return { isValid: false, quality, reason: 'Low readability ratio' };
+  let quality = 0;
+  quality += letterRatio * 40; // Up to 40 points for letter content
+  quality += Math.min(wordDensity * 2, 30); // Up to 30 points for word density
+  quality += hasStructure ? 20 : 0; // 20 points for sentence structure
+  quality += Math.min((numbers / totalChars) * 100, 10); // Up to 10 points for numbers
+  
+  quality = Math.round(quality);
+  
+  // More lenient validation - lowered from 60% to 40%
+  if (letterRatio < 0.3) {
+    return { isValid: false, quality, reason: 'Too few alphabetic characters' };
   }
   
-  if (words < 50) {
+  if (words < 20) {
     return { isValid: false, quality, reason: 'Too few words detected' };
+  }
+  
+  if (quality < 40) {
+    return { isValid: false, quality, reason: 'Overall quality score too low' };
   }
   
   return { isValid: true, quality };
 }
 
-// Extract and validate text from PDF
+// Extract and validate text with enhanced error handling
 async function extractAndValidateText(buffer: ArrayBuffer): Promise<{ text: string, quality: number, method: string }> {
-  const MAX_CHARS = 50000;
+  const MAX_CHARS = 100000; // Increased from 50k
   
   try {
-    // Convert ArrayBuffer to Uint8Array for processing
-    const pdfBuffer = new Uint8Array(buffer);
-    const extractedText = extractTextFromPDF(pdfBuffer);
+    console.log(`Processing PDF buffer of ${buffer.byteLength} bytes`);
     
-    // Validate text quality
+    const pdfBuffer = new Uint8Array(buffer);
+    const extractedText = await extractTextFromPDF(pdfBuffer);
+    
+    console.log(`Raw extraction completed: ${extractedText.length} characters`);
+    
+    // Validate text quality with more lenient thresholds
     const validation = validateTextQuality(extractedText);
+    console.log(`Text validation - Quality: ${validation.quality}%, Valid: ${validation.isValid}`);
     
     if (!validation.isValid) {
-      throw new Error(`PDF text extraction failed: ${validation.reason}. Quality score: ${validation.quality}%`);
+      // Log first 500 chars for debugging
+      console.log('Sample of extracted text:', extractedText.substring(0, 500));
+      throw new Error(`PDF text extraction validation failed: ${validation.reason}. Quality score: ${validation.quality}%`);
     }
     
     // Apply character limit
     let finalText = extractedText;
     if (finalText.length > MAX_CHARS) {
-      finalText = finalText.slice(0, MAX_CHARS) + '\n\n[Content truncated at 50k character limit]';
+      finalText = finalText.slice(0, MAX_CHARS) + '\n\n[Content truncated at 100k character limit]';
     }
     
     console.log(`✅ Text extracted and validated: ${finalText.length} chars (quality: ${validation.quality}%)`);
     
-    return { text: finalText, quality: validation.quality, method: 'enhanced-pdf-parsing' };
+    return { 
+      text: finalText, 
+      quality: validation.quality, 
+      method: 'enhanced-pdf-parsing-v2' 
+    };
   } catch (error) {
     console.error("❌ Enhanced extraction failed:", error.message);
     throw error;
@@ -176,7 +224,7 @@ serve(async (req) => {
   try {
     console.log('=== PDF Extraction Request Started ===')
     
-    // Get the document ID from request first for health check
+    // Parse request body
     let requestBody;
     try {
       requestBody = await req.json()
@@ -194,15 +242,15 @@ serve(async (req) => {
 
     const { documentId } = requestBody
 
-    // Health check endpoint (no auth required)
+    // Health check endpoint
     if (documentId === 'health-check') {
       console.log("🔍 Running health check...");
       return new Response(
         JSON.stringify({
           status: 'healthy',
           timestamp: new Date().toISOString(),
-          extractionMethod: 'ascii-fallback',
-          description: "PDF extraction service is running with ASCII fallback method"
+          extractionMethod: 'enhanced-pdf-parsing-v2',
+          description: "PDF extraction service is running with enhanced parsing"
         }),
         { 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -210,7 +258,7 @@ serve(async (req) => {
       )
     }
 
-    // Create Supabase client with service role for database operations
+    // Create Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
@@ -253,8 +301,7 @@ serve(async (req) => {
     try {
       console.log('Fetching PDF from storage:', document.storage_url);
       
-      // Extract the file path from storage URL
-      // Storage URL format: https://[project].supabase.co/storage/v1/object/public/documents/[userId]/[fileId].pdf
+      // Extract file path from storage URL
       const urlParts = document.storage_url.split('/');
       const pathIndex = urlParts.indexOf('documents');
       if (pathIndex === -1 || pathIndex + 2 >= urlParts.length) {
@@ -263,7 +310,7 @@ serve(async (req) => {
       const filePath = urlParts.slice(pathIndex + 1).join('/');
       console.log('Extracted file path:', filePath);
       
-      // Use service role client to download directly from storage
+      // Download file from storage
       const { data: fileData, error: downloadError } = await supabaseClient.storage
         .from('documents')
         .download(filePath);
@@ -273,17 +320,20 @@ serve(async (req) => {
         throw new Error(`Failed to download PDF from storage: ${downloadError?.message || 'No file data'}`);
       }
 
-      // Convert Blob to ArrayBuffer
+      // Convert to ArrayBuffer for processing
       const pdfBuffer = await fileData.arrayBuffer();
-      console.log(`PDF downloaded via storage API: ${pdfBuffer.byteLength} bytes`)
+      console.log(`PDF downloaded successfully: ${pdfBuffer.byteLength} bytes`)
       
       // Extract and validate text using enhanced method
       const { text: extractedText, quality, method } = await extractAndValidateText(pdfBuffer);
       
-      console.log(`Final extracted text: ${extractedText.length} characters using ${method} (quality: ${quality}%)`);
+      console.log(`✅ Extraction complete: ${extractedText.length} characters using ${method} (quality: ${quality}%)`);
+      
+      // Log first 200 characters for debugging
+      console.log('Text preview:', extractedText.substring(0, 200) + '...');
 
-      // Implement smart chunking for AI context (12000 tokens with 500 overlap)
-      const chunks = chunkText(extractedText, 12000, 500);
+      // Smart chunking for AI context
+      const chunks = chunkText(extractedText, 15000, 500); // Increased chunk size
       console.log(`Text chunked into ${chunks.length} segments`);
 
       // Update document with extracted text
@@ -309,7 +359,8 @@ serve(async (req) => {
           textLength: extractedText.length,
           chunks: chunks.length,
           quality: quality,
-          method: method
+          method: method,
+          preview: extractedText.substring(0, 200) + '...'
         }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -317,13 +368,13 @@ serve(async (req) => {
       )
 
     } catch (extractionError) {
-      console.error('Text extraction error:', extractionError)
+      console.error('❌ Text extraction error:', extractionError)
       
       const errorMessage = extractionError instanceof Error 
         ? extractionError.message 
         : 'Failed to extract text from PDF';
       
-      // Update document status to error with detailed message
+      // Update document status to error
       await supabaseClient
         .from('documents')
         .update({ 
@@ -345,7 +396,7 @@ serve(async (req) => {
     }
 
   } catch (error) {
-    console.error('Unexpected error:', error)
+    console.error('❌ Unexpected error:', error)
     return new Response(
       JSON.stringify({ error: 'Internal server error' }),
       { 

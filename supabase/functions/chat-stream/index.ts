@@ -1,3 +1,4 @@
+
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
@@ -26,26 +27,21 @@ serve(async (req) => {
       throw new Error('OpenAI API key not configured');
     }
 
-    // Initialize Supabase admin client for database operations
+    // Initialize Supabase admin client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Try to get user from auth header if provided
+    // Authentication handling
     let userId = null;
     const authHeader = req.headers.get('Authorization');
     
     if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
-        // Extract the JWT token
         const token = authHeader.replace('Bearer ', '');
-        
-        // Verify the JWT and get user
         const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
         
-        if (error) {
-          console.error('Auth verification error:', error);
-        } else if (user) {
+        if (!error && user) {
           userId = user.id;
           console.log('Authenticated user:', user.email || user.id);
         }
@@ -54,12 +50,11 @@ serve(async (req) => {
       }
     }
 
-    // Handle anonymous users by creating an anonymous session
+    // Handle anonymous users
     if (!userId) {
       console.log('No authenticated user found, creating anonymous session');
       
       try {
-        // Create anonymous session using Supabase auth
         const { data: anonData, error: anonError } = await supabaseAdmin.auth.signInAnonymously();
         
         if (anonError || !anonData.user) {
@@ -91,11 +86,7 @@ serve(async (req) => {
       
       if (threadError) {
         console.error('Thread creation error:', threadError);
-        // If it's a conflict, it might be a unique constraint violation
-        if (threadError.code === '23505') {
-          throw new Error(`Thread creation conflict: ${threadError.details || threadError.message}`);
-        }
-        throw new Error(`Failed to create thread: ${threadError.message} (${threadError.code}) - ${threadError.details || 'No details'}`);
+        throw new Error(`Failed to create thread: ${threadError.message}`);
       }
       
       actualThreadId = newThread.id;
@@ -117,108 +108,154 @@ serve(async (req) => {
       throw new Error('Failed to save message');
     }
 
-    // Enhanced system prompt for commercial real estate analysis
-    let systemPrompt = `You are an expert commercial real estate analyst and investment advisor. You specialize in analyzing offering memorandums, investment opportunities, and providing insights on commercial real estate deals.
+    // Enhanced system prompt with financial document expertise
+    let systemPrompt = `You are an expert commercial real estate analyst and investment advisor with deep expertise in analyzing offering memorandums (OMs), investment packages, and financial documents.
 
-Your expertise includes:
-- Financial analysis (NOI, cap rates, cash flow, valuation)
-- Market analysis and comparables
-- Due diligence considerations
-- Investment risk assessment
-- Property types (multifamily, office, retail, industrial, mixed-use)
+**Your Core Expertise:**
+- Financial Analysis: NOI, cap rates, cash flow analysis, DCF modeling, sensitivity analysis
+- Market Analysis: Comparables, market trends, submarket dynamics, demographic analysis  
+- Due Diligence: Risk assessment, environmental concerns, legal issues, tenant analysis
+- Property Types: Multifamily, office, retail, industrial, mixed-use, hospitality, self-storage
+- Investment Metrics: IRR, NPV, equity multiple, DSCR, LTV, yield on cost
+- Real Estate Finance: Debt structuring, equity partnerships, tax considerations
 
-When analyzing documents or answering questions:
-1. Provide specific, data-driven insights
-2. Reference exact figures from the document when available
-3. Offer practical investment perspectives
-4. Highlight both opportunities and risks
-5. Use industry-standard terminology and metrics
+**Response Guidelines:**
+1. **Be Specific & Data-Driven**: Always reference exact numbers, percentages, and metrics from the document
+2. **Financial Focus**: Prioritize financial analysis and investment implications
+3. **Risk Assessment**: Identify both opportunities and risks in every analysis  
+4. **Industry Terminology**: Use proper CRE terminology and standard industry metrics
+5. **Actionable Insights**: Provide practical recommendations and next steps
+6. **Context Awareness**: Consider market conditions and property type specifics
 
-Be professional, thorough, and actionable in your responses.`;
+**Document Analysis Approach:**
+- Extract and analyze key financial metrics (rent roll, NOI, expenses, cap rates)
+- Identify value-add opportunities and potential risks
+- Compare to market standards and benchmarks
+- Highlight unusual or noteworthy terms/conditions
+- Assess the strength of tenant base and lease terms
+- Evaluate location and market factors
+
+Always be thorough, professional, and focused on helping users make informed investment decisions.`;
     
-    // Get document context if provided
+    // Get document context with enhanced processing
     if (documentId) {
       const { data: document } = await supabaseAdmin
         .from('documents')
-        .select('name, extracted_text')
+        .select('name, extracted_text, type, size')
         .eq('id', documentId)
         .single();
 
       if (document?.extracted_text) {
-        const maxContextLength = 10000; // Increased context window
+        const maxContextLength = 15000; // Increased context window
         let documentContext = document.extracted_text;
         
+        console.log(`Document context available: ${documentContext.length} characters`);
+        
         if (documentContext.length > maxContextLength) {
-          // Try to include the most relevant parts
-          const parts = documentContext.split(/\n\s*\n/);
+          // Intelligent truncation - prioritize financial sections
+          const sections = documentContext.split(/\n\s*\n/);
           let truncatedContext = '';
-          for (const part of parts) {
-            if (truncatedContext.length + part.length > maxContextLength) {
-              break;
+          let prioritySections = '';
+          
+          // Look for financial keywords first
+          const financialKeywords = /(?:noi|net operating income|cap rate|cash flow|rent roll|financial|income|expenses|returns?|irr)/i;
+          
+          for (const section of sections) {
+            if (financialKeywords.test(section)) {
+              if (prioritySections.length + section.length < maxContextLength * 0.7) {
+                prioritySections += section + '\n\n';
+              }
             }
-            truncatedContext += part + '\n\n';
           }
-          documentContext = truncatedContext || documentContext.substring(0, maxContextLength);
+          
+          // Fill remaining space with other content
+          const remainingSpace = maxContextLength - prioritySections.length;
+          for (const section of sections) {
+            if (!financialKeywords.test(section) && truncatedContext.length + section.length < remainingSpace) {
+              truncatedContext += section + '\n\n';
+            }
+          }
+          
+          documentContext = prioritySections + truncatedContext;
         }
 
-        systemPrompt += `\n\nCURRENT DOCUMENT CONTEXT:
-Document: ${document.name}
-Type: ${document.type}
-Content: ${documentContext}
+        systemPrompt += `\n\n**CURRENT DOCUMENT ANALYSIS:**
+Document: "${document.name}"
+Type: ${document.type || 'PDF'}
+Size: ${Math.round((document.size || 0) / 1024)} KB
+Content Preview: "${documentContext.substring(0, 200)}..."
 
-Use this document context to answer questions about the property, financial metrics, and investment opportunity. Reference specific details from the document when relevant.`;
+**FULL DOCUMENT CONTENT:**
+${documentContext}
+
+**ANALYSIS INSTRUCTIONS:**
+- This document contains commercial real estate information that you should analyze thoroughly
+- Look for key financial metrics, property details, market information, and investment terms
+- Reference specific numbers, percentages, and data points from the document in your responses
+- If the user asks general questions, relate them back to this specific property/deal when relevant
+- Focus on practical investment insights and actionable recommendations`;
+        
+        console.log(`Enhanced document context prepared: ${documentContext.length} characters`);
+      } else {
+        console.log('No extracted text found for document');
+        systemPrompt += `\n\nNote: Document "${document?.name || 'Unknown'}" is available but text extraction may still be in progress or failed. If the user asks about the document, let them know the content is not yet accessible for analysis.`;
       }
     }
 
-    // Make OpenAI API call
-    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openaiApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4.1-2025-01-14', // Latest model for better analysis
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: message }
-        ],
-        temperature: 0.3, // Lower temperature for more consistent analysis
-        stream: true,
-        max_tokens: 2000, // Increased for detailed responses
-      }),
-    });
-
-    if (!openaiResponse.ok) {
-      const errorText = await openaiResponse.text();
-      console.error('OpenAI API error:', errorText);
-      
-      // Try fallback with older model
-      console.log('Trying fallback model...');
-      const fallbackResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+    // Enhanced OpenAI API call with better model and settings
+    let openaiResponse;
+    
+    try {
+      // Try with GPT-4o (more capable model)
+      openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${openaiApiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
+          model: 'gpt-4o', // Upgraded from gpt-4o-mini
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: message }
           ],
-          temperature: 0.3,
+          temperature: 0.2, // Lower for more consistent analysis
           stream: true,
-          max_tokens: 1500,
+          max_tokens: 3000, // Increased for detailed responses
         }),
       });
-      
-      if (!fallbackResponse.ok) {
-        throw new Error('Failed to get AI response from both primary and fallback models');
+
+      if (!openaiResponse.ok) {
+        console.log('Primary model failed, trying fallback...');
+        
+        // Fallback to gpt-4o-mini if primary fails
+        openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openaiApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: message }
+            ],
+            temperature: 0.2,
+            stream: true,
+            max_tokens: 2000,
+          }),
+        });
+        
+        if (!openaiResponse.ok) {
+          const errorText = await openaiResponse.text();
+          console.error('Both OpenAI models failed:', errorText);
+          throw new Error('Failed to get AI response from both primary and fallback models');
+        }
       }
-      
-      // Use fallback response
-      openaiResponse = fallbackResponse;
+    } catch (error) {
+      console.error('OpenAI API error:', error);
+      throw new Error(`OpenAI API error: ${error.message}`);
     }
 
     // Create assistant message placeholder
@@ -335,24 +372,12 @@ Use this document context to answer questions about the property, financial metr
     
   } catch (error) {
     console.error('Chat stream error:', error);
-    console.error('Error stack:', error.stack);
-    
-    // Return detailed error for debugging
-    const errorDetails = {
-      error: error.message || 'Internal server error',
-      type: error.constructor.name,
-      stack: error.stack,
-      // Include environment check
-      env: {
-        hasOpenAI: !!Deno.env.get('OPENAI_API_KEY'),
-        hasSupabaseUrl: !!Deno.env.get('SUPABASE_URL'),
-        hasSupabaseKey: !!Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'),
-        hasAnonKey: !!Deno.env.get('SUPABASE_ANON_KEY'),
-      }
-    };
     
     return new Response(
-      JSON.stringify(errorDetails),
+      JSON.stringify({
+        error: error.message || 'Internal server error',
+        details: 'Enhanced chat system with improved document analysis'
+      }),
       { 
         status: 500, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 

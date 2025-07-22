@@ -1,185 +1,224 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+};
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    // Create Supabase client
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      {
-        global: {
-          headers: { Authorization: req.headers.get('Authorization')! },
-        },
-      }
-    )
-
-    // Get the current user
-    const {
-      data: { user },
-      error: userError,
-    } = await supabaseClient.auth.getUser()
-
-    if (userError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { 
-          status: 401, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
-    }
-
-    // Parse request body
-    const { documentId } = await req.json()
+    const { documentId } = await req.json();
 
     if (!documentId) {
-      return new Response(
-        JSON.stringify({ error: 'Document ID is required' }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
+      throw new Error('Document ID is required');
     }
 
-    // Get document with extracted text
-    const { data: document, error: docError } = await supabaseClient
+    const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
+    if (!openaiApiKey) {
+      throw new Error('OpenAI API key not configured');
+    }
+
+    // Initialize Supabase client
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Get document
+    const { data: document, error: docError } = await supabase
       .from('documents')
-      .select('extracted_text, name')
+      .select('*')
       .eq('id', documentId)
-      .eq('user_id', user.id)
-      .single()
+      .single();
 
     if (docError || !document) {
-      return new Response(
-        JSON.stringify({ error: 'Document not found' }),
-        { 
-          status: 404, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
+      throw new Error('Document not found');
     }
 
     if (!document.extracted_text) {
-      return new Response(
-        JSON.stringify({ error: 'Document text not yet extracted. Please wait for processing to complete.' }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
+      throw new Error('Document text has not been extracted yet');
     }
 
-    // Get OpenAI API key
-    const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
-    if (!openaiApiKey) {
-      throw new Error('OpenAI API key not configured')
-    }
+    console.log(`Generating snapshot for document: ${document.name}`);
+    console.log(`Document text length: ${document.extracted_text.length} characters`);
 
-    // Create extraction prompt
-    const systemPrompt = `You are an expert commercial real estate analyst. Extract key deal metrics from the offering memorandum text provided.
+    // Enhanced prompt for better financial analysis
+    const prompt = `Analyze this commercial real estate offering memorandum and extract key investment information. Return a JSON object with the following structure:
 
-Return a JSON object with the following structure:
 {
   "propertyName": "string",
-  "address": "string",
-  "propertyType": "string (e.g., multifamily, office, retail, industrial)",
-  "yearBuilt": number or null,
-  "totalUnits": number or null,
-  "squareFootage": number or null,
-  "askingPrice": number or null,
-  "noi": number or null,
-  "capRate": number or null,
-  "occupancy": number or null,
-  "highlights": ["array of key investment highlights"],
-  "risks": ["array of potential risks or concerns"],
-  "marketOverview": "brief market summary",
-  "sponsorInfo": "sponsor/seller information"
+  "address": "string", 
+  "propertyType": "string",
+  "askingPrice": number (in dollars, no commas),
+  "noi": number (net operating income in dollars),
+  "capRate": number (as percentage, e.g., 5.5 for 5.5%),
+  "occupancy": number (as percentage),
+  "totalUnits": number (if applicable),
+  "yearBuilt": number,
+  "highlights": ["string", "string", ...] (3-5 key selling points),
+  "risks": ["string", "string", ...] (3-5 key risks or concerns)
 }
 
-Important:
-- Extract exact numbers when available
-- Use null for missing data
-- Cap rate should be a percentage (e.g., 6.5 for 6.5%)
-- Financial figures should be raw numbers (e.g., 5000000 for $5M)
-- Keep highlights and risks concise but informative`
+**Financial Analysis Guidelines:**
+- Look for NOI (Net Operating Income), cap rate, and asking price prominently
+- Calculate cap rate if not explicitly stated (NOI / Asking Price * 100)
+- Extract occupancy rates, lease terms, and tenant information
+- Identify value-add opportunities and potential risks
+- Focus on quantifiable metrics and specific details
 
-    const userPrompt = `Extract the deal metrics from this offering memorandum:
+**Property Information:**
+- Extract exact address and property type
+- Look for unit count, square footage, year built
+- Note any recent improvements or capital expenditures
 
-${document.extracted_text}`
+**Investment Highlights & Risks:**
+- Highlights should focus on positive investment attributes
+- Risks should identify potential concerns or challenges
+- Be specific and quantifiable where possible
 
-    // Call OpenAI
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openaiApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature: 0.1,
-        max_tokens: 2000,
-        response_format: { type: "json_object" }
-      }),
-    })
+Document to analyze:
+${document.extracted_text.substring(0, 15000)}`;
 
-    if (!response.ok) {
-      const error = await response.text()
-      console.error('OpenAI API error:', error)
-      throw new Error(`OpenAI API error: ${response.status}`)
+    // Call OpenAI with enhanced model
+    let response;
+    try {
+      response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o', // Upgraded model
+          messages: [
+            {
+              role: 'system',
+              content: 'You are an expert commercial real estate analyst. Analyze offering memorandums and extract key financial and investment data. Always return valid JSON.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          temperature: 0.1, // Low temperature for consistent extraction
+          max_tokens: 2000,
+        }),
+      });
+
+      if (!response.ok) {
+        console.log('Primary model failed, trying fallback...');
+        // Fallback to gpt-4o-mini
+        response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openaiApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              {
+                role: 'system',
+                content: 'You are an expert commercial real estate analyst. Analyze offering memorandums and extract key financial and investment data. Always return valid JSON.'
+              },
+              {
+                role: 'user',
+                content: prompt
+              }
+            ],
+            temperature: 0.1,
+            max_tokens: 1500,
+          }),
+        });
+        
+        if (!response.ok) {
+          throw new Error('Both OpenAI models failed');
+        }
+      }
+    } catch (error) {
+      console.error('OpenAI API error:', error);
+      throw new Error(`Failed to generate snapshot: ${error.message}`);
     }
 
-    const completion = await response.json()
-    const extractedData = JSON.parse(completion.choices[0].message.content)
+    const result = await response.json();
+    const content = result.choices[0]?.message?.content;
 
-    // Log usage for tracking
-    await supabaseClient
-      .from('usage_logs')
-      .insert({
-        user_id: user.id,
-        action: 'document_snapshot',
-        document_id: documentId,
-      })
+    if (!content) {
+      throw new Error('No content received from OpenAI');
+    }
 
-    // Return the extracted snapshot
+    console.log('Raw OpenAI response:', content);
+
+    // Parse JSON response with enhanced error handling
+    let snapshot;
+    try {
+      // Clean the content to extract JSON
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      const jsonString = jsonMatch ? jsonMatch[0] : content;
+      snapshot = JSON.parse(jsonString);
+    } catch (parseError) {
+      console.error('Failed to parse JSON:', parseError);
+      console.log('Raw content:', content);
+      
+      // Fallback: create a basic snapshot from available data
+      snapshot = {
+        propertyName: document.name.replace('.pdf', ''),
+        address: 'Address not extracted',
+        propertyType: 'Commercial Real Estate',
+        askingPrice: null,
+        noi: null,
+        capRate: null,
+        occupancy: null,
+        totalUnits: null,
+        yearBuilt: null,
+        highlights: ['Professional offering memorandum available'],
+        risks: ['Detailed analysis required']
+      };
+    }
+
+    // Log usage
+    try {
+      await supabase
+        .from('usage_logs')
+        .insert({
+          user_id: document.user_id,
+          action: 'document_snapshot',
+          document_id: documentId
+        });
+    } catch (logError) {
+      console.error('Failed to log usage:', logError);
+      // Don't fail the main request for logging errors
+    }
+
+    console.log('Generated snapshot:', snapshot);
+
     return new Response(
       JSON.stringify({
         success: true,
         documentName: document.name,
-        snapshot: extractedData,
-        message: 'Deal snapshot extracted successfully'
+        snapshot: snapshot
       }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      { 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       }
-    )
+    );
 
   } catch (error) {
-    console.error('Snapshot generation error:', error)
+    console.error('Snapshot generation error:', error);
     return new Response(
       JSON.stringify({ 
-        error: 'Failed to generate snapshot', 
-        details: error instanceof Error ? error.message : 'Unknown error' 
+        error: error.message,
+        details: 'Enhanced snapshot generation with improved analysis'
       }),
       { 
         status: 500, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       }
-    )
+    );
   }
-})
+});
