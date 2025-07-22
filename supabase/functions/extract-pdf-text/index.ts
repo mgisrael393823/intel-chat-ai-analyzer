@@ -2,17 +2,8 @@ console.log("⚡️ PDF Extraction Function initializing…");
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getDocument } from "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.js";
 
 console.log("✅ Basic imports loaded successfully");
-
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout = 10000) {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-  const res = await fetch(url, { ...options, signal: controller.signal });
-  clearTimeout(id);
-  return res;
-}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -20,76 +11,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 }
 
-// Primary: PDF.js text extraction with full fidelity
-async function extractTextWithPDFJS(buffer: ArrayBuffer): Promise<string> {
-  console.log('🔍 Starting PDF.js text extraction...')
-  const startTime = Date.now()
-  
-  try {
-    const data = new Uint8Array(buffer)
-    console.log(`Loading PDF document... (${data.length} bytes)`)
-    
-    // Configure PDF.js for Edge Runtime compatibility
-    const loadingTask = getDocument({
-      data,
-      disableWorker: true,        // Force main-thread processing (no DOM required)
-      standardFontDataUrl: false, // No external font fetches
-      disableFontFace: true       // Skip custom fonts
-    })
-    const pdf = await loadingTask.promise
-    
-    const totalPages = pdf.numPages
-    const maxPages = Math.min(10, totalPages) // Limit to 10 pages for performance
-    
-    console.log(`PDF loaded: ${totalPages} pages, processing first ${maxPages}`)
-    
-    let fullText = ""
-    
-    for (let i = 1; i <= maxPages; i++) {
-      try {
-        console.log(`Processing page ${i}/${maxPages}...`)
-        const page = await pdf.getPage(i)
-        const textContent = await page.getTextContent()
-        
-        // Extract text from page items with proper spacing
-        const pageText = textContent.items
-          .map((item: { str: string }) => item.str)
-          .join(" ")
-          .trim()
-        
-        if (pageText) {
-          fullText += pageText + "\n\n"
-          console.log(`Page ${i}: extracted ${pageText.length} characters`)
-        } else {
-          console.log(`Page ${i}: no text found`)
-        }
-      } catch (pageError) {
-        console.warn(`Error processing page ${i}:`, pageError.message)
-        // Continue with other pages
-      }
-    }
-    
-    // Clean up PDF document
-    if (pdf.destroy) {
-      await pdf.destroy()
-    }
-    
-    const extractionTime = Date.now() - startTime
-    console.log('✅ PDF.js extraction completed:', {
-      totalPages,
-      pagesProcessed: maxPages,
-      charactersExtracted: fullText.length,
-      extractionTimeMs: extractionTime
-    })
-    
-    return fullText.trim()
-  } catch (error) {
-    console.error('❌ PDF.js extraction failed:', error)
-    throw new Error(`PDF.js extraction failed: ${error.message}`)
-  }
-}
-
-// Fallback: ASCII-based PDF text extraction (guaranteed to work)
+// ASCII-based PDF text extraction (guaranteed to work)
 function extractTextWithASCII(buffer: ArrayBuffer): string {
   console.log('📝 Starting ASCII fallback text extraction...')
   const startTime = Date.now()
@@ -121,31 +43,18 @@ function extractTextWithASCII(buffer: ArrayBuffer): string {
   }
 }
 
-// Master extraction function with intelligent fallback
+// Simple extraction function using ASCII only
 async function extractTextFromPDF(buffer: ArrayBuffer): Promise<{ text: string, method: string }> {
   const MAX_CHARS = 100000
   let extractedText = ""
-  let method = "unknown"
+  let method = "ascii-fallback"
   
   try {
-    extractedText = await extractTextWithPDFJS(buffer)
-    method = "pdfjs-cdn"
-    console.log(`✅ Used PDF.js CDN extraction: ${extractedText.length} chars`)
-  } catch (pdfJsError) {
-    console.warn("⚠️ PDF.js extraction failed, falling back to ASCII:", pdfJsError.message)
-    // Fall through to ASCII method
-  }
-  
-  // Use ASCII fallback if PDF.js failed or unavailable
-  if (!extractedText) {
-    try {
-      extractedText = extractTextWithASCII(buffer)
-      method = "ascii-fallback"
-      console.log(`✅ Used ASCII fallback extraction: ${extractedText.length} chars`)
-    } catch (asciiError) {
-      console.error("❌ Both extraction methods failed:", asciiError.message)
-      throw new Error(`All text extraction methods failed: ${asciiError.message}`)
-    }
+    extractedText = extractTextWithASCII(buffer)
+    console.log(`✅ Used ASCII fallback extraction: ${extractedText.length} chars`)
+  } catch (asciiError) {
+    console.error("❌ ASCII extraction failed:", asciiError.message)
+    throw new Error(`Text extraction failed: ${asciiError.message}`)
   }
   
   // Apply character limit
@@ -189,12 +98,7 @@ serve(async (req) => {
   try {
     console.log('=== PDF Extraction Request Started ===')
     
-    // Create Supabase client with service role for database operations
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Get the document ID from request
+    // Get the document ID from request first for health check
     let requestBody;
     try {
       requestBody = await req.json()
@@ -212,81 +116,26 @@ serve(async (req) => {
 
     const { documentId } = requestBody
 
-    // Health check endpoint with comprehensive PDF.js testing
+    // Health check endpoint (no auth required)
     if (documentId === 'health-check') {
-      console.log("🔍 Running comprehensive health check...");
-      const startTime = Date.now();
-
-      let testResult = null;
-      try {
-          // Create minimal test PDF
-          const testPdfContent = `%PDF-1.4
-1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
-2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
-3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R>>endobj
-4 0 obj<</Length 44>>stream
-BT/Helvetica 12 Tf 72 720 Td(Test)Tj ET
-endstream endobj
-xref 0 5
-0000000000 65535 f 
-0000000009 00000 n 
-0000000058 00000 n 
-0000000115 00000 n 
-0000000251 00000 n 
-trailer<</Size 5/Root 1 0 R>>startxref 320%%EOF`;
-          
-          const testBuffer = new TextEncoder().encode(testPdfContent);
-          console.log(`Testing PDF.js with ${testBuffer.length} byte test PDF`);
-          
-          // Use same Edge Runtime compatible configuration
-          const loadingTask = getDocument({
-            data: testBuffer,
-            disableWorker: true,        // Force main-thread processing
-            standardFontDataUrl: false, // No external font fetches  
-            disableFontFace: true       // Skip custom fonts
-          });
-          const pdf = await loadingTask.promise;
-          const page = await pdf.getPage(1);
-          const textContent = await page.getTextContent();
-          const extractedText = textContent.items.map((item: { str: string }) => item.str).join(" ");
-          
-          // Clean up
-          if (pdf.destroy) await pdf.destroy();
-          
-          testResult = {
-            success: true,
-            extractedText: extractedText.trim(),
-            testTimeMs: Date.now() - startTime
-          };
-          console.log("✅ PDF.js test extraction successful");
-        } catch (testError) {
-          testResult = {
-            success: false,
-            error: testError.message,
-            testTimeMs: Date.now() - startTime
-          };
-          console.error("❌ PDF.js test extraction failed:", testError);
-        }
-
+      console.log("🔍 Running health check...");
       return new Response(
         JSON.stringify({
           status: 'healthy',
           timestamp: new Date().toISOString(),
-          pdfJs: {
-            available: true,
-            test: testResult
-          },
-          asciiParser: {
-            available: true,
-            description: "Fallback ASCII extraction always available"
-          },
-          totalHealthCheckTime: Date.now() - startTime
+          extractionMethod: 'ascii-fallback',
+          description: "PDF extraction service is running with ASCII fallback method"
         }),
         { 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
       )
     }
+
+    // Create Supabase client with service role for database operations
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
 
     if (!documentId) {
       console.log('Request rejected: Missing document ID')
@@ -350,7 +199,7 @@ trailer<</Size 5/Root 1 0 R>>startxref 320%%EOF`;
       const pdfBuffer = await fileData.arrayBuffer();
       console.log(`PDF downloaded via storage API: ${pdfBuffer.byteLength} bytes`)
       
-      // Extract text using intelligent method selection with fallback
+      // Extract text using ASCII method
       const { text: extractedText, method } = await extractTextFromPDF(pdfBuffer)
       
       // Validate extracted text
@@ -386,8 +235,7 @@ trailer<</Size 5/Root 1 0 R>>startxref 320%%EOF`;
           message: `PDF text extracted successfully using ${method}`,
           textLength: extractedText.length,
           chunks: chunks.length,
-          method: method,
-          pdfJsAvailable: true
+          method: method
         }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -416,7 +264,7 @@ trailer<</Size 5/Root 1 0 R>>startxref 320%%EOF`;
           details: errorMessage
         }),
         {
-          status: 502,
+          status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
       )

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, LogOut } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { FileUploadZone } from '@/components/chat/FileUploadZone';
