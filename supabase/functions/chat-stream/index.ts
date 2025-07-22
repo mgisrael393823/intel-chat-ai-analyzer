@@ -34,35 +34,45 @@ serve(async (req) => {
     // Try to get user from auth header if provided
     let userId = null;
     const authHeader = req.headers.get('Authorization');
-    if (authHeader) {
+    
+    if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
-        // Create a client with the user's token to check auth
-        const supabaseAuth = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!, {
-          auth: {
-            persistSession: false,
-            autoRefreshToken: false,
-          },
-          global: {
-            headers: {
-              Authorization: authHeader,
-            },
-          },
-        });
+        // Extract the JWT token
+        const token = authHeader.replace('Bearer ', '');
         
-        const { data: { user } } = await supabaseAuth.auth.getUser();
-        if (user) {
+        // Verify the JWT and get user
+        const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+        
+        if (error) {
+          console.error('Auth verification error:', error);
+        } else if (user) {
           userId = user.id;
-          console.log('Authenticated user:', user.email);
+          console.log('Authenticated user:', user.email || user.id);
         }
       } catch (e) {
-        console.log('Auth check failed, proceeding as anonymous:', e.message);
+        console.error('Auth check failed:', e);
       }
     }
 
-    // Use a default user ID for anonymous requests (for testing)
+    // Handle anonymous users by creating an anonymous session
     if (!userId) {
-      userId = '00000000-0000-0000-0000-000000000000'; // Anonymous user
-      console.log('Processing as anonymous user');
+      console.log('No authenticated user found, creating anonymous session');
+      
+      try {
+        // Create anonymous session using Supabase auth
+        const { data: anonData, error: anonError } = await supabaseAdmin.auth.signInAnonymously();
+        
+        if (anonError || !anonData.user) {
+          console.error('Failed to create anonymous session:', anonError);
+          throw new Error('Authentication required. Please sign in to use chat.');
+        }
+        
+        userId = anonData.user.id;
+        console.log('Created anonymous session with ID:', userId);
+      } catch (e) {
+        console.error('Anonymous session creation failed:', e);
+        throw new Error('Authentication required. Please sign in to use chat.');
+      }
     }
 
     // Get or create thread
@@ -81,7 +91,11 @@ serve(async (req) => {
       
       if (threadError) {
         console.error('Thread creation error:', threadError);
-        throw new Error('Failed to create thread');
+        // If it's a conflict, it might be a unique constraint violation
+        if (threadError.code === '23505') {
+          throw new Error(`Thread creation conflict: ${threadError.details || threadError.message}`);
+        }
+        throw new Error(`Failed to create thread: ${threadError.message} (${threadError.code}) - ${threadError.details || 'No details'}`);
       }
       
       actualThreadId = newThread.id;
@@ -261,10 +275,24 @@ serve(async (req) => {
     
   } catch (error) {
     console.error('Chat stream error:', error);
+    console.error('Error stack:', error.stack);
+    
+    // Return detailed error for debugging
+    const errorDetails = {
+      error: error.message || 'Internal server error',
+      type: error.constructor.name,
+      stack: error.stack,
+      // Include environment check
+      env: {
+        hasOpenAI: !!Deno.env.get('OPENAI_API_KEY'),
+        hasSupabaseUrl: !!Deno.env.get('SUPABASE_URL'),
+        hasSupabaseKey: !!Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'),
+        hasAnonKey: !!Deno.env.get('SUPABASE_ANON_KEY'),
+      }
+    };
+    
     return new Response(
-      JSON.stringify({ 
-        error: error.message || 'Internal server error'
-      }),
+      JSON.stringify(errorDetails),
       { 
         status: 500, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 

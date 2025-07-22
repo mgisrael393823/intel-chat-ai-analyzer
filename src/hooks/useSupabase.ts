@@ -283,8 +283,17 @@ export const useSupabase = () => {
         let errorMessage = `HTTP ${response.status}`;
         try {
           const errorData = await response.json();
+          console.error('Chat stream error details:', errorData);
           if (errorData.error) {
             errorMessage = errorData.error;
+          }
+          // Log environment check if available
+          if (errorData.env) {
+            console.error('Environment variables check:', errorData.env);
+          }
+          // Log stack trace if available
+          if (errorData.stack) {
+            console.error('Stack trace:', errorData.stack);
           }
         } catch {
           // If we can't parse JSON, use status text

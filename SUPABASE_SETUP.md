@@ -11,7 +11,7 @@ Ensure users are signed in before using chat functionality. The app already hand
 #### Option B: Enable Anonymous Access (For Testing)
 1. Go to Supabase Dashboard > Authentication > Settings
 2. Enable "Allow anonymous sign-ins"
-3. Update the chat function to create anonymous sessions
+3. The chat function will automatically create anonymous sessions for unauthenticated users
 
 ### 2. Database Permissions
 The following tables need proper RLS policies:
