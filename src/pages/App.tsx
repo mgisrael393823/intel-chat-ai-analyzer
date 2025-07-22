@@ -9,6 +9,11 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { useSupabase, Document } from '@/hooks/useSupabase';
+import { useIsMobile } from '@/hooks/useIsMobile';
+import { MobileTabsWrapper } from '@/components/mobile/MobileTabsWrapper';
+import { MobileChatView } from '@/components/mobile/MobileChatView';
+import { MobileFileView } from '@/components/mobile/MobileFileView';
+import { cn } from '@/lib/utils';
 import ErrorBoundary from '@/components/ErrorBoundary';
 
 interface UploadedFile {
@@ -20,6 +25,7 @@ interface UploadedFile {
 }
 
 const App = () => {
+  const { isMobile, isLoading } = useIsMobile();
   const [uploadedDocuments, setUploadedDocuments] = useState<Document[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -217,6 +223,7 @@ const App = () => {
     await supabase.auth.signOut();
   };
 
+
   const handleDeleteDocument = async (documentId: string) => {
     if (!window.confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
       return;
@@ -251,73 +258,142 @@ const App = () => {
     }
   };
 
-  const AppContent = () => (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-background via-background to-muted/20">
-      {/* Header */}
-      <header className="flex-shrink-0 border-b border-border/50 bg-card/50 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <Link to="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
-              <ArrowLeft className="w-4 h-4" />
-              <span className="hidden sm:inline">Back to Home</span>
-              <span className="sm:hidden">Back</span>
-            </Link>
-            <h1 className="text-lg sm:text-xl font-semibold text-foreground">OM Intel Chat</h1>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={handleSignOut}
-              className="flex items-center gap-2"
-            >
-              <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">Sign Out</span>
-            </Button>
+  const AppContent = () => {
+    // Show loading state while determining mobile/desktop
+    if (isLoading) {
+      return (
+        <div className="h-screen flex items-center justify-center bg-background">
+          <div className="text-center space-y-4">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto" />
+            <p className="text-muted-foreground">Loading...</p>
           </div>
         </div>
-      </header>
+      );
+    }
 
-      {/* Main Content - flexible height */}
-      <main className="flex-1 flex flex-col min-h-0">
-        <div className="flex-1 max-w-7xl mx-auto w-full p-2 sm:p-4 flex flex-col min-h-0">
-          <div className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-6 min-h-0">
-            {/* Left Column - File Upload */}
-            <aside className="w-full lg:w-[400px] xl:w-[450px] flex-shrink-0 overflow-y-auto">
-              <FileUploadZone
-                onFileUpload={handleFileUpload}
-                onFileDelete={handleDeleteDocument}
-                uploadedFiles={uploadedDocuments.map(doc => ({
-                  id: doc.id,
-                  name: doc.name,
-                  size: doc.size,
-                  type: doc.type,
-                  status: doc.status,
-                  error_message: doc.error_message,
-                }))}
-                isUploading={isUploading}
-                uploadProgress={uploadProgress}
-              />
-            </aside>
-
-            {/* Right Column - Chat Interface */}
-            <div className="flex-1 flex flex-col bg-card/30 backdrop-blur-sm rounded-lg border border-border/50 shadow-lg min-h-0 overflow-hidden">
-              <ChatMessages
-                messages={messages}
-                isStreaming={isStreaming}
-              />
-              
-              <ChatInput
-                onSendMessage={handleSendMessage}
-                onStopGeneration={handleStopGeneration}
-                isStreaming={isStreaming}
-                disabled={isUploading}
-                hasUploadedFiles={uploadedDocuments.length > 0}
-              />
+    return (
+      <div className={cn(
+        "flex flex-col bg-gradient-to-br from-background via-background to-muted/20 overflow-hidden",
+        isMobile ? "mobile-viewport-height safe-area-top" : "h-screen"
+      )}>
+        {/* Header */}
+        <header className="flex-shrink-0 border-b border-border/50 bg-card/50 backdrop-blur-sm">
+          <div className={cn(
+            "mx-auto px-4 py-4",
+            isMobile ? "" : "max-w-7xl"
+          )}>
+            <div className="flex items-center justify-between">
+              <Link to="/" className={cn(
+                "flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors",
+                isMobile ? "min-w-[48px] min-h-[48px]" : "min-w-[44px] min-h-[44px]"
+              )}>
+                <ArrowLeft className="w-4 h-4" />
+                {!isMobile && <span className="hidden sm:inline">Back to Home</span>}
+                {isMobile && <span className="text-sm">Back</span>}
+              </Link>
+              <h1 className={cn(
+                "font-semibold text-foreground",
+                isMobile ? "text-lg" : "text-lg sm:text-xl"
+              )}>
+                {isMobile ? "Chat" : "OM Intel Chat"}
+              </h1>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={handleSignOut}
+                className={cn(
+                  "flex items-center gap-2",
+                  isMobile ? "min-w-[48px] min-h-[48px]" : "min-w-[44px] min-h-[44px]"
+                )}
+              >
+                <LogOut className="w-4 h-4" />
+                {!isMobile && <span className="hidden sm:inline">Sign Out</span>}
+              </Button>
             </div>
           </div>
-        </div>
-      </main>
-    </div>
-  );
+        </header>
+
+        {/* Main Content */}
+        <main className="flex-1 overflow-hidden">
+          {isMobile ? (
+            // Mobile Layout with Tabs
+            <>
+              <MobileTabsWrapper
+                chatContent={
+                  <MobileChatView
+                    messages={messages}
+                    isStreaming={isStreaming}
+                    isUploading={isUploading}
+                    hasUploadedFiles={uploadedDocuments.length > 0}
+                    onSendMessage={handleSendMessage}
+                    onStopGeneration={handleStopGeneration}
+                    onFileUpload={handleFileUpload}
+                  />
+                }
+                filesContent={
+                  <MobileFileView
+                    onFileUpload={handleFileUpload}
+                    onFileDelete={handleDeleteDocument}
+                    uploadedFiles={uploadedDocuments.map(doc => ({
+                      id: doc.id,
+                      name: doc.name,
+                      size: doc.size,
+                      type: doc.type,
+                      status: doc.status,
+                      error_message: doc.error_message,
+                    }))}
+                    isUploading={isUploading}
+                    uploadProgress={uploadProgress}
+                  />
+                }
+                uploadedFilesCount={uploadedDocuments.length}
+                processingFilesCount={uploadedDocuments.filter(doc => doc.status === 'processing').length}
+              />
+            </>
+          ) : (
+            // Desktop Layout (existing)
+            <div className="h-full max-w-7xl mx-auto p-4">
+              <div className="h-full flex flex-col lg:flex-row gap-4">
+                {/* Left Column - File Upload */}
+                <aside className="w-full lg:w-1/3 xl:w-2/5 max-w-md h-full lg:h-auto overflow-y-auto">
+                  <FileUploadZone
+                    onFileUpload={handleFileUpload}
+                    onFileDelete={handleDeleteDocument}
+                    uploadedFiles={uploadedDocuments.map(doc => ({
+                      id: doc.id,
+                      name: doc.name,
+                      size: doc.size,
+                      type: doc.type,
+                      status: doc.status,
+                      error_message: doc.error_message,
+                    }))}
+                    isUploading={isUploading}
+                    uploadProgress={uploadProgress}
+                  />
+                </aside>
+
+                {/* Right Column - Chat Interface */}
+                <div className="flex-1 h-full min-h-[400px] lg:min-h-0 flex flex-col bg-card/30 backdrop-blur-sm rounded-lg border border-border/50 shadow-lg overflow-hidden">
+                  <ChatMessages
+                    messages={messages}
+                    isStreaming={isStreaming}
+                  />
+                  
+                  <ChatInput
+                    onSendMessage={handleSendMessage}
+                    onStopGeneration={handleStopGeneration}
+                    isStreaming={isStreaming}
+                    disabled={isUploading}
+                    hasUploadedFiles={uploadedDocuments.length > 0}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  };
 
   return (
     <ErrorBoundary>

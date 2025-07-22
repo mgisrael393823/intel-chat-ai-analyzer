@@ -2,6 +2,7 @@ import React, { useCallback, useState, memo } from 'react';
 import { Upload, File, X, BarChart3, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useSupabase } from '@/hooks/useSupabase';
 import { cn } from '@/lib/utils';
 
@@ -117,17 +118,18 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = memo(({
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
           >
-            <input
-              type="file"
-              id="pdf-upload"
-              name="pdf-upload"
-              accept=".pdf"
-              multiple
-              onChange={handleFileInput}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              disabled={isUploading}
-              aria-label="Upload PDF files"
-            />
+            <label htmlFor="pdf-upload" className="absolute inset-0 w-full h-full cursor-pointer" aria-label="Upload PDF files">
+              <input
+                type="file"
+                id="pdf-upload"
+                name="pdf-upload"
+                accept=".pdf"
+                multiple
+                onChange={handleFileInput}
+                className="sr-only"
+                disabled={isUploading}
+              />
+            </label>
             
             <Upload className={cn(
               'mx-auto h-12 w-12 mb-4 transition-colors duration-200',
@@ -172,23 +174,32 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = memo(({
                   key={file.id}
                   className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-border/50 hover:bg-muted/50 transition-colors group"
                 >
-                  <div className="flex items-center space-x-3">
-                    <div className="relative">
+                  <div className="flex items-center space-x-3 min-w-0">
+                    <div className="relative inline-block flex-shrink-0">
                       <File className="h-5 w-5 text-primary" />
-                      {file.status === 'processing' && (
-                        <Loader2 className="h-3 w-3 absolute -bottom-1 -right-1 text-blue-500 animate-spin" />
-                      )}
-                      {file.status === 'ready' && (
-                        <CheckCircle className="h-3 w-3 absolute -bottom-1 -right-1 text-green-500" />
-                      )}
-                      {file.status === 'error' && (
-                        <AlertCircle className="h-3 w-3 absolute -bottom-1 -right-1 text-red-500" />
-                      )}
+                      <div className="absolute -bottom-1 -right-1 pointer-events-none">
+                        {file.status === 'processing' && (
+                          <Loader2 className="h-3 w-3 text-blue-500 animate-spin" />
+                        )}
+                        {file.status === 'ready' && (
+                          <CheckCircle className="h-3 w-3 text-green-500" />
+                        )}
+                        {file.status === 'error' && (
+                          <AlertCircle className="h-3 w-3 text-red-500" />
+                        )}
+                      </div>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {file.name}
-                      </p>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <p className="text-sm font-medium text-foreground truncate">
+                            {file.name}
+                          </p>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <p className="break-all">{file.name}</p>
+                        </TooltipContent>
+                      </Tooltip>
                       <div className="flex items-center gap-2">
                         <p className="text-xs text-muted-foreground">
                           {formatFileSize(file.size)}
@@ -213,34 +224,50 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = memo(({
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleGenerateSnapshot(file.id)}
-                      disabled={generatingSnapshot === file.id}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity text-xs px-2 py-1 h-7"
-                    >
-                      {generatingSnapshot === file.id ? (
-                        <>
-                          <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-1" />
-                          Analyzing...
-                        </>
-                      ) : (
-                        <>
-                          <BarChart3 className="h-3 w-3 mr-1" />
-                          Snapshot
-                        </>
-                      )}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeFile(file.id)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleGenerateSnapshot(file.id)}
+                          disabled={generatingSnapshot === file.id || file.status !== 'ready'}
+                          className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity text-xs px-2 py-1 h-7 min-w-[44px]"
+                          style={{ zIndex: 'var(--z-dropdown)' }}
+                        >
+                          {generatingSnapshot === file.id ? (
+                            <>
+                              <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-1" />
+                              <span className="hidden sm:inline">Analyzing...</span>
+                            </>
+                          ) : (
+                            <>
+                              <BarChart3 className="h-3 w-3 sm:mr-1" />
+                              <span className="hidden sm:inline">Snapshot</span>
+                            </>
+                          )}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="left">
+                        <p>Generate AI snapshot of this document</p>
+                      </TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeFile(file.id)}
+                          className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity min-w-[44px] min-h-[44px]"
+                          aria-label="Delete document"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="left">
+                        <p>Delete document</p>
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
                 </div>
               ))}
