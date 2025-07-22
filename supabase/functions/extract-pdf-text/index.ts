@@ -336,15 +336,18 @@ trailer<</Size 5/Root 1 0 R>>startxref 320%%EOF`;
       const filePath = urlParts.slice(pathIndex + 1).join('/');
       console.log('Extracted file path:', filePath);
       
-      // Download PDF with timeout
-      const downloadUrl = `${supabaseUrl}/storage/v1/object/public/documents/${filePath}`;
-      const downloadRes = await fetchWithTimeout(downloadUrl, {
-        headers: { Authorization: `Bearer ${supabaseServiceKey}` }
-      }, 10000);
-      if (!downloadRes.ok) {
-        throw new Error(`Failed to download PDF: ${downloadRes.status}`);
+      // Use service role client to download directly from storage
+      const { data: fileData, error: downloadError } = await supabaseClient.storage
+        .from('documents')
+        .download(filePath);
+      
+      if (downloadError || !fileData) {
+        console.error('Storage download error:', downloadError);
+        throw new Error(`Failed to download PDF from storage: ${downloadError?.message || 'No file data'}`);
       }
-      const pdfBuffer = await downloadRes.arrayBuffer();
+
+      // Convert Blob to ArrayBuffer
+      const pdfBuffer = await fileData.arrayBuffer();
       console.log(`PDF downloaded via storage API: ${pdfBuffer.byteLength} bytes`)
       
       // Extract text using intelligent method selection with fallback

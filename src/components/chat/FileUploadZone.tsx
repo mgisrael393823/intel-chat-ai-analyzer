@@ -67,18 +67,25 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = memo(({
 
   const handleFiles = async (files: File[]) => {
     setLoading(true);
-    // Filter for PDF files only
-    const pdfFiles = files.filter(file => file.type === 'application/pdf');
-    
-    if (pdfFiles.length !== files.length) {
-      // Show error for non-PDF files
-      // Only PDF files are allowed
+    try {
+      // Filter for PDF files only
+      const pdfFiles = files.filter(file => file.type === 'application/pdf');
+      
+      if (pdfFiles.length !== files.length) {
+        // Show error for non-PDF files
+        console.warn('Some files were filtered out - only PDF files are allowed');
+      }
+      
+      if (pdfFiles.length > 0) {
+        await onFileUpload(pdfFiles);
+      }
+    } catch (error) {
+      console.error('Error handling file upload:', error);
+      // Could add user-facing error notification here
+      alert(`Error uploading files: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setLoading(false);
     }
-    
-    if (pdfFiles.length > 0) {
-      await onFileUpload(pdfFiles);
-    }
-    setLoading(false);
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
