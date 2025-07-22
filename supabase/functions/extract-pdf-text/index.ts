@@ -1,17 +1,19 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-// Use pdf-parse for now until we fix pdfjs-dist imports
-import pdf from 'https://esm.sh/pdf-parse@1.1.1'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 }
 
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return new Response(null, { 
+      status: 204,
+      headers: corsHeaders 
+    })
   }
 
   try {
@@ -57,27 +59,16 @@ serve(async (req) => {
       .eq('id', documentId)
 
     try {
-      // Extract the file path from storage URL
-      // Storage URL format: https://[project].supabase.co/storage/v1/object/public/documents/[userId]/[fileId].pdf
-      const urlParts = document.storage_url.split('/');
-      const fileName = urlParts.slice(-2).join('/'); // Get userId/fileId.pdf
+      console.log('Fetching PDF from storage URL:', document.storage_url);
       
-      console.log('Downloading file from storage:', fileName);
-      
-      // Download the PDF file from storage
-      const { data: fileData, error: downloadError } = await supabaseClient.storage
-        .from('documents')
-        .download(fileName)
-
-      if (downloadError || !fileData) {
-        console.error('Download error:', downloadError);
-        console.error('File path attempted:', fileName);
-        console.error('Storage URL:', document.storage_url);
-        throw new Error(`Failed to download PDF file: ${downloadError?.message || 'No file data'}`)
+      // Fetch PDF directly from storage URL
+      const response = await fetch(document.storage_url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch PDF: ${response.status} ${response.statusText}`)
       }
 
-      // Convert file to buffer for pdf-parse
-      const buffer = await fileData.arrayBuffer()
+      // Get PDF as ArrayBuffer for PDF.js
+      const pdfBuffer = await response.arrayBuffer()
       
       // Configuration for optimized extraction
       const MAX_PAGES = 10
@@ -86,18 +77,14 @@ serve(async (req) => {
       let extractedText = ''
       
       try {
-        console.log('Starting optimized PDF extraction...')
+        console.log('Starting simple PDF text extraction...')
         const startTime = Date.now()
         
-        // Extract text using pdf-parse with page limit
-        const data = await pdf(buffer, {
-          max: MAX_PAGES // Limit to first 10 pages
-        })
+        // Simple text extraction from PDF binary data
+        const uint8Array = new Uint8Array(pdfBuffer)
+        const text = extractTextFromPDFBinary(uint8Array)
         
-        console.log(`PDF info: ${data.numpages} total pages, processing first ${Math.min(MAX_PAGES, data.numpages)} pages`)
-        
-        // Get the extracted text
-        extractedText = data.text
+        extractedText = text
         
         // Apply character limit
         if (extractedText.length > MAX_CHARS) {
@@ -106,15 +93,13 @@ serve(async (req) => {
         
         const extractionTime = Date.now() - startTime
         console.log('Extraction complete:', {
-          totalPages: data.numpages,
-          pagesProcessed: Math.min(MAX_PAGES, data.numpages),
           charactersExtracted: extractedText.length,
-          timeMs: extractionTime,
-          timePerPage: Math.round(extractionTime / Math.min(MAX_PAGES, data.numpages))
+          timeMs: extractionTime
         })
+        
       } catch (pdfError) {
-        console.error('PDF parsing error:', pdfError)
-        throw new Error('Failed to parse PDF content')
+        console.error('PDF extraction error:', pdfError)
+        throw new Error(`Failed to extract text from PDF: ${pdfError.message || 'Unknown error'}`)
       }
       
       // Validate extracted text
@@ -188,6 +173,64 @@ serve(async (req) => {
     )
   }
 })
+
+// Simple PDF text extraction from binary data
+function extractTextFromPDFBinary(pdfData: Uint8Array): string {
+  const textDecoder = new TextDecoder('utf-8', { fatal: false })
+  const pdfString = textDecoder.decode(pdfData)
+  
+  // Look for text objects in PDF structure
+  const textMatches = []
+  
+  // Match PDF text strings - pattern for text between parentheses or brackets
+  const textRegexes = [
+    /\((.*?)\)/g,  // Text in parentheses
+    /\[(.*?)\]/g,  // Text in brackets  
+    /BT\s+(.*?)\s+ET/g, // Text between BT (Begin Text) and ET (End Text)
+    /Tj\s*\((.*?)\)/g, // Tj operator with text
+    /TJ\s*\[(.*?)\]/g  // TJ operator with text array
+  ]
+  
+  for (const regex of textRegexes) {
+    let match
+    while ((match = regex.exec(pdfString)) !== null) {
+      const text = match[1]
+      if (text && text.trim() && text.length > 1) {
+        // Clean up the text
+        const cleanText = text
+          .replace(/\\n/g, '\n')
+          .replace(/\\r/g, '\r')
+          .replace(/\\t/g, '\t')
+          .replace(/\\\\/g, '\\')
+          .replace(/\\\)/g, ')')
+          .replace(/\\\(/g, '(')
+          .trim()
+        
+        if (cleanText.length > 2 && !cleanText.match(/^[0-9\s\.]+$/)) {
+          textMatches.push(cleanText)
+        }
+      }
+    }
+  }
+  
+  // Also try to extract readable ASCII text directly
+  const asciiText = pdfString.replace(/[^\x20-\x7E\n\r\t]/g, ' ')
+  const words = asciiText.split(/\s+/)
+    .filter(word => 
+      word.length > 2 && 
+      word.match(/[a-zA-Z]/) && 
+      !word.match(/^[0-9\.]+$/)
+    )
+  
+  // Combine extracted text
+  const allText = [...textMatches, ...words].join(' ')
+  
+  // Clean up and format the text
+  return allText
+    .replace(/\s+/g, ' ')
+    .replace(/(.{100})/g, '$1\n') // Add line breaks for readability
+    .trim()
+}
 
 // Helper function to chunk text for AI processing
 function chunkText(text: string, maxTokens: number, overlap: number): string[] {
