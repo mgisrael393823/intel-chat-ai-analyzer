@@ -12,9 +12,6 @@ export const AuthCallback = () => {
       if (processed) return;
       processed = true;
       
-      console.log('AuthCallback: Processing magic link...');
-      console.log('Current URL:', window.location.href);
-      console.log('Hash:', window.location.hash);
       
       try {
         // Get the hash from the URL
@@ -24,51 +21,37 @@ export const AuthCallback = () => {
         const access_token = hashParams.get('access_token');
         const refresh_token = hashParams.get('refresh_token');
 
-        console.log('AuthCallback: Hash params:', {
-          error,
-          hasAccessToken: !!access_token,
-          hasRefreshToken: !!refresh_token
-        });
 
         if (error) {
-          console.error('Auth callback error:', error, errorDescription);
           navigate('/?error=' + encodeURIComponent(error));
           return;
         }
 
         if (access_token && refresh_token) {
-          console.log('AuthCallback: Setting session from tokens...');
           
           const { data, error: sessionError } = await supabase.auth.setSession({
             access_token,
             refresh_token
           });
 
-          console.log('AuthCallback: Session result:', { data, sessionError });
 
           if (sessionError) {
-            console.error('Session error:', sessionError);
             navigate('/?error=session_failed');
             return;
           }
 
           if (data.user) {
-            console.log('AuthCallback: Successfully authenticated user:', data.user.email);
             // Small delay before redirect to ensure session is set
             setTimeout(() => {
               navigate('/app');
             }, 500);
           } else {
-            console.error('No user data after setting session');
             navigate('/?error=no_user');
           }
         } else {
-          console.error('No auth tokens found in URL');
-          console.log('Full hash:', window.location.hash);
           navigate('/?error=no_tokens');
         }
       } catch (err) {
-        console.error('Error processing auth callback:', err);
         navigate('/?error=callback_failed');
       }
     };
@@ -76,7 +59,6 @@ export const AuthCallback = () => {
     // Timeout to prevent infinite loading
     const fallbackTimeout = setTimeout(() => {
       if (!processed) {
-        console.error('AuthCallback: Timeout - falling back to home');
         navigate('/?error=timeout');
       }
     }, 10000); // 10 second timeout

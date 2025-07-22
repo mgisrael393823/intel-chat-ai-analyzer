@@ -25,7 +25,7 @@ export interface Document {
 
 export const useSupabase = () => {
   const uploadFile = async (file: File): Promise<Document> => {
-    console.log('📁 uploadFile called with:', { name: file.name, size: file.size, type: file.type });
+    // Upload file to Supabase Storage
 
     try {
       const session = await authService.getSessionWithTimeout();
@@ -36,14 +36,11 @@ export const useSupabase = () => {
       const userId = session.user.id;
       const userEmail = session.user.email;
       
-      console.log('👤 Uploading as user:', userEmail);
       
       // Generate unique filename with user ID prefix for organization
       const fileExt = file.name.split('.').pop() || 'pdf';
       const fileName = `${userId}/${crypto.randomUUID()}.${fileExt}`;
       
-      console.log('⏳ Starting direct upload to Supabase Storage...');
-      console.log('📦 Bucket: documents, Path:', fileName);
       
       // Direct upload to Supabase Storage
       const { data: uploadData, error: uploadError } = await supabase
@@ -54,10 +51,8 @@ export const useSupabase = () => {
           upsert: false // Prevent overwriting existing files
         });
       
-      console.log('✅ Direct upload response:', { data: uploadData, error: uploadError });
       
       if (uploadError) {
-        console.error('❌ Storage upload error:', uploadError);
         throw uploadError;
       }
       
@@ -70,7 +65,6 @@ export const useSupabase = () => {
         .from('documents')
         .getPublicUrl(uploadData.path);
       
-      console.log('🔗 Public URL generated:', urlData.publicUrl);
       
       // Create document record in database
       const documentRecord = {
@@ -83,7 +77,6 @@ export const useSupabase = () => {
         upload_progress: 100
       };
       
-      console.log('💾 Creating document record:', documentRecord);
       
       const { data: documentData, error: dbError } = await supabase
         .from('documents')
@@ -92,20 +85,16 @@ export const useSupabase = () => {
         .single();
       
       if (dbError) {
-        console.error('❌ Database error:', dbError);
         // Try to clean up the uploaded file
         await supabase.storage.from('documents').remove([uploadData.path]);
         throw new Error('Failed to save document record: ' + dbError.message);
       }
       
-      console.log('✅ Document record created:', documentData);
       
       // Trigger PDF text extraction asynchronously
       // Note: This is fire-and-forget, we don't await it
       extractPdfText(documentData.id).then(success => {
-        console.log('📄 PDF extraction completed:', success);
       }).catch(error => {
-        console.error('📄 PDF extraction failed:', error);
         // Update document status to error
         supabase
           .from('documents')
@@ -114,14 +103,13 @@ export const useSupabase = () => {
             error_message: 'Failed to extract text from PDF'
           })
           .eq('id', documentData.id)
-          .then(() => console.log('Updated document status to error'))
-          .catch(err => console.error('Failed to update document status:', err));
+          .then(() => {})
+          .catch(() => {});
       });
       
       // Return the document immediately (extraction happens in background)
       return documentData as Document;
     } catch (error) {
-      console.error('❌ Upload file error:', error);
       throw error;
     }
   };
@@ -135,13 +123,11 @@ export const useSupabase = () => {
         .single();
 
       if (error) {
-        console.error('Get document error:', error);
         return null;
       }
 
       return data;
     } catch (error) {
-      console.error('Get document error:', error);
       return null;
     }
   };
@@ -154,13 +140,11 @@ export const useSupabase = () => {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('Get user documents error:', error);
         return [];
       }
 
       return data || [];
     } catch (error) {
-      console.error('Get user documents error:', error);
       return [];
     }
   };
@@ -181,7 +165,6 @@ export const useSupabase = () => {
           .remove([fileName]);
 
         if (storageError) {
-          console.error('Storage deletion error:', storageError);
         }
       }
 
@@ -192,13 +175,11 @@ export const useSupabase = () => {
         .eq('id', id);
 
       if (error) {
-        console.error('Database deletion error:', error);
         throw new Error('Failed to delete document');
       }
 
       return true;
     } catch (error) {
-      console.error('Delete document error:', error);
       return false;
     }
   };
@@ -248,7 +229,6 @@ export const useSupabase = () => {
 
       return result.success;
     } catch (error) {
-      console.error('Extract PDF text error:', error);
       return false;
     }
   };
@@ -298,8 +278,33 @@ export const useSupabase = () => {
         body: JSON.stringify({ message, threadId, documentId })
       });
 
-      if (!response.ok || !response.body) {
-        onError?.(`HTTP ${response.status}`);
+      if (!response.ok) {
+        // Try to get error details from response
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+          const errorData = await response.json();
+          console.error('Chat stream error details:', errorData);
+          if (errorData.error) {
+            errorMessage = errorData.error;
+          }
+          // Log environment check if available
+          if (errorData.env) {
+            console.error('Environment variables check:', errorData.env);
+          }
+          // Log stack trace if available
+          if (errorData.stack) {
+            console.error('Stack trace:', errorData.stack);
+          }
+        } catch {
+          // If we can't parse JSON, use status text
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        }
+        onError?.(errorMessage);
+        return;
+      }
+      
+      if (!response.body) {
+        onError?.('No response body received');
         return;
       }
 
@@ -352,8 +357,17 @@ export const useSupabase = () => {
         }
       }
     } catch (error) {
-      console.error('💥 sendMessage unexpected error:', error);
-      onError?.(error instanceof Error ? error.message : 'Failed to send message');
+      let errorMessage = 'Failed to send message';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        // Add more context for common errors
+        if (error.message.includes('Failed to fetch')) {
+          errorMessage = 'Network error: Unable to connect to the server';
+        } else if (error.message.includes('Unauthorized')) {
+          errorMessage = 'Authentication error: Please sign in again';
+        }
+      }
+      onError?.(errorMessage);
     }
   };
 
@@ -366,13 +380,11 @@ export const useSupabase = () => {
         .order('created_at', { ascending: true });
 
       if (error) {
-        console.error('Get thread messages error:', error);
         return [];
       }
 
       return data || [];
     } catch (error) {
-      console.error('Get thread messages error:', error);
       return [];
     }
   };
@@ -389,13 +401,11 @@ export const useSupabase = () => {
         .order('updated_at', { ascending: false });
 
       if (error) {
-        console.error('Get user threads error:', error);
         return [];
       }
 
       return data || [];
     } catch (error) {
-      console.error('Get user threads error:', error);
       return [];
     }
   };
@@ -415,13 +425,11 @@ export const useSupabase = () => {
       });
 
       if (error) {
-        console.error('Snapshot generation error:', error);
         throw new Error(error.message || 'Failed to generate snapshot');
       }
 
       return data;
     } catch (error) {
-      console.error('Generate snapshot error:', error);
       throw error;
     }
   };

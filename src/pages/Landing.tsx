@@ -16,7 +16,6 @@ const Landing = () => {
     const error = urlParams.get('error');
     if (error) {
       setAuthError(error);
-      console.log('🚨 Auth error on landing page:', error);
       // Clean up URL
       window.history.replaceState(null, '', window.location.pathname);
     }
