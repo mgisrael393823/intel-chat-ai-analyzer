@@ -305,17 +305,31 @@ serve(async (req) => {
       .eq('id', documentId)
 
     try {
-      console.log('Fetching PDF from storage URL:', document.storage_url);
+      console.log('Fetching PDF from storage:', document.storage_url);
       
-      // Fetch PDF directly from storage URL
-      const response = await fetch(document.storage_url);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch PDF: ${response.status} ${response.statusText}`)
+      // Extract the file path from storage URL
+      // Storage URL format: https://[project].supabase.co/storage/v1/object/public/documents/[userId]/[fileId].pdf
+      const urlParts = document.storage_url.split('/');
+      const pathIndex = urlParts.indexOf('documents');
+      if (pathIndex === -1 || pathIndex + 2 >= urlParts.length) {
+        throw new Error('Invalid storage URL format');
+      }
+      const filePath = urlParts.slice(pathIndex + 1).join('/');
+      console.log('Extracted file path:', filePath);
+      
+      // Use service role client to download directly from storage
+      const { data: fileData, error: downloadError } = await supabaseClient.storage
+        .from('documents')
+        .download(filePath);
+      
+      if (downloadError || !fileData) {
+        console.error('Storage download error:', downloadError);
+        throw new Error(`Failed to download PDF from storage: ${downloadError?.message || 'No file data'}`);
       }
 
-      // Get PDF as ArrayBuffer
-      const pdfBuffer = await response.arrayBuffer()
-      console.log(`PDF downloaded: ${pdfBuffer.byteLength} bytes`)
+      // Convert Blob to ArrayBuffer
+      const pdfBuffer = await fileData.arrayBuffer();
+      console.log(`PDF downloaded via storage API: ${pdfBuffer.byteLength} bytes`)
       
       // Extract text using intelligent method selection with fallback
       const { text: extractedText, method } = await extractTextFromPDF(pdfBuffer)
