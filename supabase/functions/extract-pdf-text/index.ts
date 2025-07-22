@@ -123,16 +123,16 @@ function validateTextQuality(text: string): { isValid: boolean; quality: number;
   
   quality = Math.round(quality);
   
-  // Lowered threshold to 30% to allow more documents through
-  if (letterRatio < 0.25) {
+  // Lowered threshold to 20% to allow more complex documents through
+  if (letterRatio < 0.15) {
     return { isValid: false, quality, reason: 'Too few alphabetic characters' };
   }
   
-  if (words < 15) {
+  if (words < 10) {
     return { isValid: false, quality, reason: 'Too few words detected' };
   }
   
-  if (quality < 30) {
+  if (quality < 20) {
     return { isValid: false, quality, reason: 'Overall quality score too low' };
   }
   
