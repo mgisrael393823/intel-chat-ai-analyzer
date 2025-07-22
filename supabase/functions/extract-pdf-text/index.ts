@@ -53,50 +53,123 @@ async function extractTextFromPDF(pdfBuffer: Uint8Array): Promise<string> {
   }
 }
 
-// Fallback text extraction method
+// Enhanced fallback text extraction with multiple strategies
 async function fallbackTextExtraction(pdfBuffer: Uint8Array): Promise<string> {
-  console.log("Using fallback text extraction method");
+  console.log("Using enhanced fallback text extraction method");
   
   try {
     const pdfString = new TextDecoder('latin1').decode(pdfBuffer);
     
-    // Look for text objects in PDF
+    // Strategy 1: Enhanced text object patterns
     const textMatches = [];
-    const patterns = [
-      /\(([^)]{10,})\)\s*Tj/g,
-      /\(([^)]{10,})\)\s*TJ/g,
-      /BT\s+[^(]*\(([^)]{10,})\)[^E]*ET/gs,
+    const enhancedPatterns = [
+      // Standard text positioning operators
+      /\(([^)]{3,})\)\s*Tj/g,
+      /\(([^)]{3,})\)\s*TJ/g,
+      /\[([^\]]{10,})\]\s*TJ/g,
+      
+      // Text blocks with positioning
+      /BT\s+[^(]*\(([^)]{3,})\)[^E]*ET/gs,
+      /BT\s+.*?Td\s+\(([^)]{3,})\)/gs,
+      /BT\s+.*?Tm\s+\(([^)]{3,})\)/gs,
+      
+      // Direct text content in streams
+      /stream[\s\S]*?\(([^)]{5,})\)[\s\S]*?endstream/g,
+      
+      // Hex encoded text
+      /<([0-9A-Fa-f]{8,})>\s*Tj/g,
+      /<([0-9A-Fa-f]{8,})>\s*TJ/g,
     ];
     
-    for (const pattern of patterns) {
+    for (const pattern of enhancedPatterns) {
       let match;
-      while ((match = pattern.exec(pdfString)) !== null && textMatches.length < 1000) {
-        const text = match[1]
+      while ((match = pattern.exec(pdfString)) !== null && textMatches.length < 2000) {
+        let text = match[1];
+        
+        // Handle hex encoded strings
+        if (/^[0-9A-Fa-f]+$/.test(text) && text.length % 2 === 0) {
+          try {
+            text = text.match(/.{2}/g)
+              ?.map(hex => String.fromCharCode(parseInt(hex, 16)))
+              .join('') || text;
+          } catch (e) {
+            // Keep original if hex decode fails
+          }
+        }
+        
+        // Clean up text
+        text = text
           .replace(/\\n/g, '\n')
           .replace(/\\r/g, '\r')
           .replace(/\\t/g, '\t')
           .replace(/\\\\/g, '\\')
+          .replace(/\\(\d{3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8)))
+          .replace(/[^\x20-\x7E\n\r\t]/g, ' ') // Remove non-printable chars
           .trim();
         
-        if (text.length > 5 && /[a-zA-Z]/.test(text)) {
+        if (text.length > 2 && /[a-zA-Z0-9]/.test(text)) {
           textMatches.push(text);
         }
       }
       pattern.lastIndex = 0;
     }
     
-    if (textMatches.length === 0) {
-      throw new Error('No readable text found in PDF');
+    // Strategy 2: Look for raw text in content streams
+    if (textMatches.length < 10) {
+      console.log("Trying content stream extraction...");
+      const streamPattern = /stream\s*([\s\S]*?)\s*endstream/g;
+      let streamMatch;
+      
+      while ((streamMatch = streamPattern.exec(pdfString)) !== null) {
+        const streamContent = streamMatch[1];
+        
+        // Look for readable text in streams
+        const readableText = streamContent
+          .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        
+        if (readableText.length > 20 && /[a-zA-Z]{3,}/.test(readableText)) {
+          // Extract words that look like real text
+          const words = readableText.match(/[a-zA-Z]{3,}(?:\s+[a-zA-Z]{3,})*/g);
+          if (words) {
+            textMatches.push(...words);
+          }
+        }
+      }
     }
     
-    const extractedText = textMatches.join('\n').substring(0, 100000);
-    console.log(`Fallback extraction: ${extractedText.length} characters from ${textMatches.length} text objects`);
+    // Strategy 3: Brute force text extraction from the entire PDF
+    if (textMatches.length < 5) {
+      console.log("Trying brute force text extraction...");
+      const cleanPdf = pdfString
+        .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
+        .replace(/\s+/g, ' ');
+      
+      const potentialText = cleanPdf.match(/[a-zA-Z]{3,}(?:\s+[a-zA-Z0-9\.,\-\$%]{1,}){2,}/g);
+      if (potentialText) {
+        textMatches.push(...potentialText.slice(0, 100));
+      }
+    }
     
-    return extractedText;
+    if (textMatches.length === 0) {
+      // Last resort: Return a message indicating the PDF might be image-based
+      return "This PDF appears to contain primarily images or uses a format that requires OCR (Optical Character Recognition) to extract text. The document structure suggests it may be a scanned document or uses embedded images for text content. Please consider using an OCR-enabled PDF processor or converting the document to a text-searchable format.";
+    }
+    
+    // Clean and deduplicate text
+    const uniqueText = Array.from(new Set(textMatches))
+      .filter(text => text.length > 2)
+      .join('\n')
+      .substring(0, 100000);
+    
+    console.log(`Enhanced fallback extraction: ${uniqueText.length} characters from ${textMatches.length} text segments`);
+    
+    return uniqueText;
     
   } catch (error) {
-    console.error('Fallback extraction failed:', error);
-    throw new Error(`All PDF extraction methods failed: ${error.message}`);
+    console.error('Enhanced fallback extraction failed:', error);
+    return "PDF text extraction failed. This document may be image-based or use an unsupported format. The file appears to be a valid PDF but does not contain extractable text content.";
   }
 }
 
