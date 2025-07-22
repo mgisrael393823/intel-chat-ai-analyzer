@@ -16,22 +16,43 @@ async function loadPDFJS(): Promise<boolean> {
   }
   
   try {
-    console.log("🔄 Loading PDF.js CDN dynamically...");
-    // Import PDF.js from jsDelivr CDN
-    const { getDocument, GlobalWorkerOptions } = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@5.3.93/es5/build/pdf.js");
+    console.log("🔄 Loading PDF.js via ESM.sh...");
+    // Try ESM.sh which is more compatible with edge runtimes
+    const pdfModule = await import("https://esm.sh/pdfjs-dist@3.11.174/build/pdf.js");
+    const { getDocument } = pdfModule;
     
-    // Set up the worker for PDF.js
-    GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.3.93/es5/build/pdf.worker.js";
+    // Set up the worker for PDF.js - check if GlobalWorkerOptions exists
+    if (pdfModule.GlobalWorkerOptions) {
+      pdfModule.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@3.11.174/build/pdf.worker.js";
+    }
     
     pdfjs = { getDocument };
     pdfJsAvailable = true;
-    console.log("✅ PDF.js CDN loaded successfully");
+    console.log("✅ PDF.js loaded successfully via ESM.sh");
     return true;
-  } catch (error) {
-    console.warn("⚠️ PDF.js CDN failed to load, will use ASCII fallback:", error.message);
-    pdfjs = null;
-    pdfJsAvailable = false;
-    return false;
+  } catch (esmError) {
+    console.warn("⚠️ ESM.sh PDF.js failed, trying jsdelivr fallback:", esmError.message);
+    
+    try {
+      // Fallback to jsdelivr with older, more stable version
+      const pdfModule = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.js");
+      const { getDocument } = pdfModule;
+      
+      // Set up the worker for PDF.js - check if GlobalWorkerOptions exists
+      if (pdfModule.GlobalWorkerOptions) {
+        pdfModule.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.js";
+      }
+      
+      pdfjs = { getDocument };
+      pdfJsAvailable = true;
+      console.log("✅ PDF.js loaded successfully via jsdelivr fallback");
+      return true;
+    } catch (jsDelivrError) {
+      console.warn("⚠️ All PDF.js CDNs failed, using ASCII fallback:", jsDelivrError.message);
+      pdfjs = null;
+      pdfJsAvailable = false;
+      return false;
+    }
   }
 }
 
@@ -232,6 +253,21 @@ serve(async (req) => {
     }
 
     const { documentId } = requestBody
+
+    // Health check endpoint
+    if (documentId === 'health-check') {
+      const pdfJsLoaded = await loadPDFJS()
+      return new Response(
+        JSON.stringify({ 
+          status: 'healthy',
+          pdfJsAvailable: pdfJsLoaded,
+          timestamp: new Date().toISOString()
+        }),
+        { 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
 
     if (!documentId) {
       console.log('Request rejected: Missing document ID')
