@@ -9,46 +9,48 @@ console.log("✅ Basic imports loaded successfully");
 let pdfjs: any = null;
 let pdfJsAvailable = false;
 
-// Dynamic PDF.js loader - called on first use to avoid startup delays
+// Dynamic PDF.js loader - using legacy build for Edge Runtime compatibility
 async function loadPDFJS(): Promise<boolean> {
   if (pdfjs !== null) {
     return pdfJsAvailable; // Already tried loading
   }
   
   try {
-    console.log("🔄 Loading PDF.js via ESM.sh...");
-    // Try ESM.sh which is more compatible with edge runtimes
-    const pdfModule = await import("https://esm.sh/pdfjs-dist@3.11.174/build/pdf.js");
-    const { getDocument } = pdfModule;
+    console.log("🔄 Loading PDF.js legacy build...");
+    // Use legacy build designed for environments without DOM/worker support
+    const pdfModule = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.js");
     
-    // Set up the worker for PDF.js - check if GlobalWorkerOptions exists
-    if (pdfModule.GlobalWorkerOptions) {
-      pdfModule.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@3.11.174/build/pdf.worker.js";
+    // Handle different export patterns for legacy build
+    const getDocument = pdfModule.getDocument || pdfModule.default?.getDocument || pdfModule;
+    if (!getDocument || typeof getDocument !== 'function') {
+      throw new Error("getDocument not found in PDF.js legacy module");
     }
     
+    // NO worker configuration needed for legacy build - it's designed to run without workers
     pdfjs = { getDocument };
     pdfJsAvailable = true;
-    console.log("✅ PDF.js loaded successfully via ESM.sh");
+    console.log("✅ PDF.js legacy build loaded successfully (no worker required)");
     return true;
-  } catch (esmError) {
-    console.warn("⚠️ ESM.sh PDF.js failed, trying jsdelivr fallback:", esmError.message);
+  } catch (legacyError) {
+    console.warn("⚠️ PDF.js legacy build failed, trying regular build with no-worker:", legacyError.message);
     
+    // Fallback: try regular build but completely bypass worker setup
     try {
-      // Fallback to jsdelivr with older, more stable version
+      console.log("🔄 Trying regular PDF.js build with worker bypass...");
       const pdfModule = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.js");
-      const { getDocument } = pdfModule;
       
-      // Set up the worker for PDF.js - check if GlobalWorkerOptions exists
-      if (pdfModule.GlobalWorkerOptions) {
-        pdfModule.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.js";
+      const getDocument = pdfModule.getDocument || pdfModule.default?.getDocument;
+      if (!getDocument) {
+        throw new Error("getDocument not found in regular PDF.js module");
       }
       
+      // Store reference without any worker setup
       pdfjs = { getDocument };
       pdfJsAvailable = true;
-      console.log("✅ PDF.js loaded successfully via jsdelivr fallback");
+      console.log("✅ PDF.js regular build loaded (worker setup skipped)");
       return true;
-    } catch (jsDelivrError) {
-      console.warn("⚠️ All PDF.js CDNs failed, using ASCII fallback:", jsDelivrError.message);
+    } catch (regularError) {
+      console.error("⚠️ Both legacy and regular PDF.js builds failed:", regularError.message);
       pdfjs = null;
       pdfJsAvailable = false;
       return false;
@@ -71,7 +73,13 @@ async function extractTextWithPDFJS(buffer: ArrayBuffer): Promise<string> {
     const data = new Uint8Array(buffer)
     console.log(`Loading PDF document... (${data.length} bytes)`)
     
-    const loadingTask = pdfjs.getDocument({ data })
+    // Configure PDF.js for Edge Runtime compatibility
+    const loadingTask = pdfjs.getDocument({
+      data,
+      disableWorker: true,        // Force main-thread processing (no DOM required)
+      standardFontDataUrl: false, // No external font fetches
+      disableFontFace: true       // Skip custom fonts
+    })
     const pdf = await loadingTask.promise
     
     const totalPages = pdf.numPages
@@ -254,14 +262,79 @@ serve(async (req) => {
 
     const { documentId } = requestBody
 
-    // Health check endpoint
+    // Health check endpoint with comprehensive PDF.js testing
     if (documentId === 'health-check') {
-      const pdfJsLoaded = await loadPDFJS()
+      console.log("🔍 Running comprehensive health check...");
+      const startTime = Date.now();
+      
+      const pdfJsLoaded = await loadPDFJS();
+      
+      let testResult = null;
+      if (pdfJsLoaded) {
+        try {
+          // Create minimal test PDF
+          const testPdfContent = `%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R>>endobj
+4 0 obj<</Length 44>>stream
+BT/Helvetica 12 Tf 72 720 Td(Test)Tj ET
+endstream endobj
+xref 0 5
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000251 00000 n 
+trailer<</Size 5/Root 1 0 R>>startxref 320%%EOF`;
+          
+          const testBuffer = new TextEncoder().encode(testPdfContent);
+          console.log(`Testing PDF.js with ${testBuffer.length} byte test PDF`);
+          
+          // Use same Edge Runtime compatible configuration
+          const loadingTask = pdfjs.getDocument({
+            data: testBuffer,
+            disableWorker: true,        // Force main-thread processing
+            standardFontDataUrl: false, // No external font fetches  
+            disableFontFace: true       // Skip custom fonts
+          });
+          const pdf = await loadingTask.promise;
+          const page = await pdf.getPage(1);
+          const textContent = await page.getTextContent();
+          const extractedText = textContent.items.map((item: any) => item.str).join(" ");
+          
+          // Clean up
+          if (pdf.destroy) await pdf.destroy();
+          
+          testResult = {
+            success: true,
+            extractedText: extractedText.trim(),
+            testTimeMs: Date.now() - startTime
+          };
+          console.log("✅ PDF.js test extraction successful");
+        } catch (testError) {
+          testResult = {
+            success: false,
+            error: testError.message,
+            testTimeMs: Date.now() - startTime
+          };
+          console.error("❌ PDF.js test extraction failed:", testError);
+        }
+      }
+      
       return new Response(
         JSON.stringify({ 
           status: 'healthy',
-          pdfJsAvailable: pdfJsLoaded,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          pdfJs: {
+            available: pdfJsLoaded,
+            test: testResult
+          },
+          asciiParser: {
+            available: true,
+            description: "Fallback ASCII extraction always available"
+          },
+          totalHealthCheckTime: Date.now() - startTime
         }),
         { 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
